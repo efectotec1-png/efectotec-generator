@@ -7,110 +7,101 @@ const path = require('path');
 require('dotenv').config();
 
 const app = express();
-// Upload-Ordner konfigurieren
 const upload = multer({ dest: 'uploads/' }); 
 const port = 3000;
 
-// --- 1. KI KONFIGURATION (STRATEGIE-WECHSEL) ---
+// --- CONFIG ---
+const MODEL_NAME = process.env.MODEL_NAME || "gemini-2.5-flash";
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-
-// UPDATE NACH CTO-ENTSCHEIDUNG:
-// Wir nutzen "Gemini 3.0" (High-Reasoning).
-// Priorität: Didaktische Qualität > Geschwindigkeit.
-// Die Eltern warten lieber 5 Sekunden länger für eine perfekte Aufgabe.
 const model = genAI.getGenerativeModel({ 
-  model: "gemini-3.0", 
-  generationConfig: { 
-    responseMimeType: "application/json",
-    // Wir erlauben dem Modell etwas mehr "Kreativität" für Transferaufgaben
-    temperature: 0.4 
-  } 
+  model: MODEL_NAME, 
+  generationConfig: { responseMimeType: "application/json", temperature: 0.2 } 
 });
 
-// --- 2. STARTSEITE ---
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+// --- HELPER: LaTeX Zeichen entschärfen ---
+function escapeLatex(text) {
+  if (typeof text !== 'string') return text;
+  return text
+    .replace(/\\/g, '') 
+    .replace(/([&%$#_])/g, '\\$1')
+    .replace(/~/g, '\\textasciitilde ')
+    .replace(/\^/g, '\\textasciicircum ');
+}
 
-// --- 3. HAUPT-PROZESS (POST /generate) ---
+// --- ROUTEN ---
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+
 app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
+  let texFilename = null;
+  let pdfFilename = null;
+  let imagePath = null;
+
   try {
-    console.log("-----------------------------------------");
-    console.log("NEUE ANFRAGE (Modell: Gemini 3.0 High-Res)");
-    
-    if (!req.file) {
-      return res.status(400).send("Fehler: Kein Bild hochgeladen.");
-    }
+    console.log("\n-----------------------------------------");
+    console.log("NEUE ANFRAGE STARTET");
+    console.log(`Modell: ${MODEL_NAME}`);
 
-    // SCHRITT A: Bild vorbereiten
-    console.log("A) Lese Bild ein...");
-    const imagePath = req.file.path;
+    if (!req.file) return res.status(400).send("Kein Bild hochgeladen.");
+    
+    imagePath = req.file.path;
     const imageBuffer = fs.readFileSync(imagePath);
-    const imagePart = {
-      inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
-    };
+    const imagePart = { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } };
 
-    // SCHRITT B: Prompting (Optimiert für Gemini 3.0 Reasoning)
-    console.log("B) Sende an Gemini 3.0 (Das kann kurz dauern, Quality First!)...");
+    console.log("-> Frage KI (Bitte warten)...");
     
+    // --- UPDATE: Besserer Prompt für Listen ---
     const prompt = `
-      Rolle: Erfahrener Gymnasiallehrer in Bayern (G9).
-      Aufgabe: Erstelle eine Schulaufgabe basierend auf diesem Hefteintrag.
+      Rolle: Bayerischer Gymnasiallehrer.
+      Aufgabe: Erstelle eine Schulaufgabe aus diesem Bild.
       
-      Anforderungen an die Didaktik (WICHTIG):
-      1. Nutze die Operatoren des bayerischen Lehrplans (Nenne, Beschreibe, Erläutere, Berechne).
-      2. Erstelle Aufgaben in den Anforderungsbereichen I (Reproduktion), II (Reorganisation) und III (Transfer/Urteil).
-      3. Sei präzise bei mathematischen Notation (LaTeX).
+      FORMATIERUNG (WICHTIG):
+      1. Nutze für Mathe-Formeln LaTeX-Code (z.B. $x^2$).
+      2. Wenn eine Aufgabe Unterpunkte hat (a, b, c), nutze ZWINGEND die LaTeX 'enumerate' Umgebung.
+         Beispiel für den JSON-Text: 
+         "Berechne folgendes: \\begin{enumerate}[label=\\alph*)] \\item Bestimme x. \\item Bestimme y. \\end{enumerate}"
       
-      Output-Format (Reines JSON):
+      Antworte als JSON:
       {
-        "titel": "Titel der Probe",
-        "fach": "Mathematik (oder erkanntes Fach)",
-        "aufgaben": [
-          { "text": "Aufgabentext mit LaTeX Formeln wie $x^2$", "be": 4, "loesung": "Lösungsweg in LaTeX" },
-          { "text": "Transferaufgabe...", "be": 6, "loesung": "..." }
-        ]
+        "titel": "Thema",
+        "fach": "Fach",
+        "aufgaben": [ { "text": "Frage mit itemize", "be": 5, "loesung": "Lösung" } ]
       }
     `;
 
     const result = await model.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
-    
-    // Safety-Cleaning für JSON (falls das Modell "```json" davor schreibt)
     const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     
     let schulaufgabe;
     try {
         schulaufgabe = JSON.parse(cleanedText);
     } catch (e) {
-        console.error("JSON Parsing Fehler (Raw Text):", responseText);
-        throw new Error("Das Modell hat kein valides JSON geliefert. Bitte versuche es erneut.");
+        throw new Error("KI hat kein gültiges JSON geliefert.");
     }
 
-    console.log(`   -> Generiert: "${schulaufgabe.titel}" mit ${schulaufgabe.aufgaben.length} Aufgaben.`);
+    console.log(`-> Generiert: "${schulaufgabe.titel}"`);
     
-    // SCHRITT C: LaTeX Generierung
-    console.log("C) Baue LaTeX-Dokument...");
+    console.log("-> Erstelle LaTeX Code...");
+    
+    // --- UPDATE: enumitem Paket hinzugefügt ---
     const texContent = `
       \\documentclass[a4paper,12pt]{article}
       \\usepackage[utf8]{inputenc}
       \\usepackage[ngerman]{babel}
-      \\usepackage{geometry}
-      \\geometry{a4paper, top=25mm, left=25mm, right=25mm, bottom=25mm}
       \\usepackage{amsmath}
       \\usepackage{amssymb}
       \\usepackage{fancyhdr}
+      \\usepackage{geometry}
+      \\usepackage{enumitem} % WICHTIG für a) b) c) Listen
+      \\geometry{a4paper, top=25mm, left=25mm, right=25mm, bottom=25mm}
       
       \\pagestyle{fancy}
-      \\lhead{\\textbf{efectoTEC} - Lernzielkontrolle}
-      \\rhead{Fach: ${schulaufgabe.fach}}
+      \\lhead{\\textbf{efectoTEC}}
+      \\rhead{Fach: ${escapeLatex(schulaufgabe.fach)}}
       
       \\begin{document}
-      
-      \\section*{${schulaufgabe.titel}}
+      \\section*{${escapeLatex(schulaufgabe.titel)}}
       \\textbf{Datum:} \\today \\hfill \\textbf{Name:} \\underline{\\hspace{5cm}}
-      \\vspace{0.5cm}
-      \\hrule
       \\vspace{1cm}
       
       ${schulaufgabe.aufgaben.map((a, i) => `
@@ -119,59 +110,49 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
       `).join('')}
       
       \\vspace{2cm}
-      \\begin{center}
-      \\small \\textit{Erstellt mit Gemini 3.0 & efectoTEC}
-      \\end{center}
-      
-      \\newpage
+      \\hrule
+      \\vspace{0.5cm}
       \\section*{Lösungsschlüssel}
       ${schulaufgabe.aufgaben.map((a, i) => `
-        \\textbf{Zu Aufgabe ${i+1}:} ${a.loesung} \\par
+        \\textbf{Aufgabe ${i+1}:} ${a.loesung} \\par
+        \\vspace{0.2cm}
       `).join('\n')}
-
       \\end{document}
     `;
     
-    const texFilename = `schulaufgabe_${Date.now()}.tex`;
+    texFilename = `schulaufgabe_${Date.now()}.tex`;
     fs.writeFileSync(texFilename, texContent);
 
-    // SCHRITT D: PDF Erstellung
-    console.log("D) PDF wird erstellt...");
+    console.log("-> Starte PDF-Druck (pdflatex)...");
+    
     exec(`pdflatex -interaction=nonstopmode ${texFilename}`, (error, stdout, stderr) => {
       if (error) {
-        console.error("Fehler beim PDF-Druck:", error);
-        return res.status(500).send("Fehler bei der PDF-Erstellung. Ist pdflatex installiert?");
+        console.error("!!! PDF FEHLER !!!");
+        console.error(stdout.slice(-500)); 
+        return res.status(500).send("Fehler beim PDF-Erstellen.");
       }
       
-      console.log("E) Erfolg! Sende PDF.");
-      const pdfFilename = texFilename.replace('.tex', '.pdf');
+      console.log("-> ERFOLG! PDF wird gesendet.");
+      pdfFilename = texFilename.replace('.tex', '.pdf');
       
-      res.download(pdfFilename, `Schulaufgabe_${Date.now()}.pdf`, (err) => {
-        // Aufräumen (Datenschutz: Alles sofort löschen!)
-        if (!err) {
-             try {
-                fs.unlinkSync(texFilename); 
-                fs.unlinkSync(pdfFilename);
-                fs.unlinkSync(imagePath); // WICHTIG: Originalbild löschen
-                // Logfiles aufräumen
-                if(fs.existsSync(texFilename.replace('.tex', '.log'))) fs.unlinkSync(texFilename.replace('.tex', '.log'));
-                if(fs.existsSync(texFilename.replace('.tex', '.aux'))) fs.unlinkSync(texFilename.replace('.tex', '.aux'));
-             } catch(e) {
-                 console.error("Cleanup Warning:", e);
-             }
-        }
+      res.download(pdfFilename, (err) => {
+        if (texFilename && fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
+        if (pdfFilename && fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
+        if (imagePath && fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+        const logFile = texFilename.replace('.tex', '.log');
+        const auxFile = texFilename.replace('.tex', '.aux');
+        if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+        if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
       });
     });
 
   } catch (err) {
     console.error("CRITICAL ERROR:", err);
     res.status(500).send("Server Fehler: " + err.message);
+    if (imagePath && fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
   }
 });
 
 app.listen(port, () => {
-  console.log(`\n=========================================`);
-  console.log(`   efectoTEC SERVER (GEMINI 3.0 MODE)`);
-  console.log(`   Running on: http://localhost:${port}`);
-  console.log(`=========================================\n`);
+  console.log(`efectoTEC SERVER LÄUFT (Modell: ${MODEL_NAME})`);
 });
