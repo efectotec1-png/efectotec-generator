@@ -10,22 +10,24 @@ const app = express();
 const upload = multer({ dest: 'uploads/' }); 
 const port = process.env.PORT || 8080;
 
-// --- 1. KI KONFIGURATION ---
+// --- 1. KI KONFIGURATION (FLEXIBEL) ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// WICHTIG: Wir nutzen die exakte Versions-Nummer "001".
-// Das verhindert den "Not Found" Fehler bei Alias-Namen.
-// Wir lassen apiVersion weg, damit das SDK den sichersten Weg wählt.
+// Wir lesen das Modell aus der Cloud-Variable.
+// Standard-Fallback ist 'gemini-2.5-flash', falls du vergessen hast, die Variable zu setzen.
+const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
+console.log(`>>> SYSTEM STARTET MIT MODELL: ${modelName} <<<`);
+
 const model = genAI.getGenerativeModel({ 
-  model: "gemini-1.5-flash-001"
+  model: modelName
 });
 
-// --- 2. DESIGN-ENGINE (LaTeX) ---
+// --- 2. DESIGN-ENGINE ---
 function createProfessionalLatex(data) {
-    // Sicherheits-Check: Falls mal keine BE da sind
     const totalBE = data.aufgaben ? data.aufgaben.reduce((acc, curr) => acc + (curr.be || 0), 0) : 0;
     
-    // Fallback falls totalBE 0 ist (verhindert Fehler)
+    // Fallback-Berechnung Notenschlüssel
     const grenzen = {
         1: Math.floor(totalBE * 0.87),
         2: Math.floor(totalBE * 0.73),
@@ -51,13 +53,13 @@ function createProfessionalLatex(data) {
 \\pagestyle{fancy}
 \\fancyhf{}
 \\lhead{\\textbf{efectoTEC} Generator}
-\\rhead{Fach: ${data.fach || 'Allgemein'}}
+\\rhead{Fach: ${data.fach || 'Schulaufgabe'}}
 \\rfoot{Seite \\thepage\\ von \\pageref{LastPage}}
 
 \\begin{document}
 
 \\begin{center}
-    \\huge \\textbf{${data.titel || 'Schulaufgabe'}}
+    \\huge \\textbf{${data.titel || 'Probe'}}
 \\end{center}
 \\vspace{0.5cm}
 
@@ -87,10 +89,10 @@ function createProfessionalLatex(data) {
 ${data.aufgaben ? data.aufgaben.map((aufgabe, index) => `
 \\section*{Aufgabe ${index + 1} (${aufgabe.be || '?'} BE)}
 ${aufgabe.text}
-`).join('\\vspace{0.5cm}\n') : 'Keine Aufgaben generiert.'}
+`).join('\\vspace{0.5cm}\n') : 'Fehler: Keine Aufgaben generiert.'}
 
 \\newpage
-\\fancyhead[L]{Lösungsschlüssel (Nur für Lehrkräfte)}
+\\fancyhead[L]{Lösungsschlüssel}
 \\section*{Lösungen}
 
 ${data.aufgaben ? data.aufgaben.map((aufgabe, index) => `
@@ -121,20 +123,22 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     imagePath = req.file.path;
 
     // A. KI-Verarbeitung
-    console.log("PHASE 2: Sende an Gemini (Version 1.5 Flash 001)...");
+    console.log(`PHASE 2: Sende an Gemini (${modelName})...`);
     const imageBuffer = fs.readFileSync(imagePath);
     const imagePart = {
       inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
     };
 
+    // Robuster Prompt ohne "Config-Hacks"
     const prompt = `
       Du bist ein bayerischer Gymnasiallehrer.
-      Erstelle aus diesem Hefteintrag eine Schulaufgabe (Prüfung).
+      Analysiere den Hefteintrag auf dem Bild.
+      Erstelle daraus eine Schulaufgabe.
       
-      ANTWORTE NUR MIT VALIDEM JSON. KEIN MARKDOWN.
-      Struktur:
+      ANTWORTE NUR MIT VALIDEM JSON.
+      JSON Struktur:
       {
-        "titel": "Thema",
+        "titel": "Thema der Probe",
         "fach": "Fach",
         "aufgaben": [
           { "text": "LaTeX Aufgabe", "be": 5, "loesung": "LaTeX Lösung" }
@@ -142,22 +146,17 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
       }
       
       Regeln:
-      1. Nutze LaTeX für Formeln (z.B. $x^2$).
-      2. Erstelle eine Mischung aus Rechenaufgaben und Verständnisfragen (AFB I-III).
-      3. Sei streng aber fair bei den BE.
+      1. Nutze LaTeX für Formeln.
+      2. Mische Rechenaufgaben und Verständnisfragen.
     `;
 
     const result = await model.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
-    
-    // JSON Cleaning
+
     const jsonStartIndex = responseText.indexOf('{');
     const jsonEndIndex = responseText.lastIndexOf('}');
     
-    if (jsonStartIndex === -1) {
-        console.error("KI Antwort war kein JSON:", responseText);
-        throw new Error("KI konnte kein JSON generieren. Bitte Foto prüfen.");
-    }
+    if (jsonStartIndex === -1) throw new Error("Kein JSON gefunden.");
     
     const cleanJson = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
     const schulaufgabe = JSON.parse(cleanJson);
@@ -174,12 +173,6 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     const base = path.basename(texFilename);
 
     exec(`pdflatex -interaction=nonstopmode -output-directory="${dir}" "${base}"`, (error, stdout, stderr) => {
-      if (error) {
-        console.error("!!! FEHLER BEI PDF-ERSTELLUNG !!!");
-        // Wir ignorieren LaTeX-Fehler oft, weil ein PDF trotzdem rauskommt
-        // Aber wir loggen es.
-      }
-      
       console.log("PHASE 5: PDF fertig. Download startet.");
       if (fs.existsSync(pdfFilename)) {
           res.download(pdfFilename, `efectoTEC_Probe_${timestamp}.pdf`, (err) => {
@@ -195,7 +188,7 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
             } catch (e) {}
           });
       } else {
-          res.status(500).send("Fehler: PDF wurde nicht erstellt. LaTeX-Code war evtl. fehlerhaft.");
+          res.status(500).send("Fehler: PDF konnte nicht erstellt werden.");
       }
     });
 
