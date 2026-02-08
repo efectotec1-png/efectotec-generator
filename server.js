@@ -4,11 +4,29 @@ const fs = require('fs');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { exec } = require('child_process');
 const path = require('path');
+const os = require('os'); // Wichtig für Temp-Ordner Zugriff
 require('dotenv').config();
 
 const app = express();
-const upload = multer({ dest: 'uploads/' }); 
-const port = 3000;
+
+// --- FEHLER-FIX 1: PORT ---
+// Wir nutzen den Port, den Google uns gibt (meist 8080). 
+// Nur wenn keiner da ist, nehmen wir 3000 (für deinen PC).
+const port = process.env.PORT || 8080;
+
+// --- FEHLER-FIX 2: SCHREIBRECHTE ---
+// In der Cloud dürfen wir NUR in das temporäre Verzeichnis schreiben.
+// os.tmpdir() findet automatisch den richtigen Ort (z.B. /tmp).
+const tempDir = os.tmpdir(); 
+const uploadDir = path.join(tempDir, 'efectotec_uploads');
+
+// Wir erstellen den Ordner sicher im Temp-Verzeichnis
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Multer speichert Bilder jetzt im erlaubten Temp-Ordner
+const upload = multer({ dest: uploadDir });
 
 // --- CONFIG ---
 const MODEL_NAME = process.env.MODEL_NAME || "gemini-2.5-flash";
@@ -18,7 +36,7 @@ const model = genAI.getGenerativeModel({
   generationConfig: { responseMimeType: "application/json", temperature: 0.2 } 
 });
 
-// --- HELPER: LaTeX Zeichen entschärfen ---
+// --- HELPER: Sonderzeichen maskieren ---
 function escapeLatex(text) {
   if (typeof text !== 'string') return text;
   return text
@@ -37,53 +55,35 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
   let imagePath = null;
 
   try {
-    console.log("\n-----------------------------------------");
-    console.log("NEUE ANFRAGE STARTET");
-    console.log(`Modell: ${MODEL_NAME}`);
-
-    if (!req.file) return res.status(400).send("Kein Bild hochgeladen.");
+    console.log("\n--- NEUE ANFRAGE (CLOUD) ---");
+    
+    if (!req.file) return res.status(400).send("Fehler: Kein Bild hochgeladen.");
     
     imagePath = req.file.path;
     const imageBuffer = fs.readFileSync(imagePath);
     const imagePart = { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } };
 
-    console.log("-> Frage KI (Bitte warten)...");
+    console.log("-> Frage KI (2.5 Flash)...");
     
-    // --- UPDATE: Besserer Prompt für Listen ---
     const prompt = `
       Rolle: Bayerischer Gymnasiallehrer.
-      Aufgabe: Erstelle eine Schulaufgabe aus diesem Bild.
+      Aufgabe: Erstelle eine Schulaufgabe (Mathe) aus diesem Bild.
       
-      FORMATIERUNG (WICHTIG):
-      1. Nutze für Mathe-Formeln LaTeX-Code (z.B. $x^2$).
-      2. Wenn eine Aufgabe Unterpunkte hat (a, b, c), nutze ZWINGEND die LaTeX 'enumerate' Umgebung.
-         Beispiel für den JSON-Text: 
-         "Berechne folgendes: \\begin{enumerate}[label=\\alph*)] \\item Bestimme x. \\item Bestimme y. \\end{enumerate}"
+      FORMATIERUNG:
+      1. Nutze LaTeX für Formeln ($x^2$).
+      2. WICHTIG: Nutze für Aufzählungen (a, b, c) die LaTeX-Umgebung 'enumerate'.
       
-      Antworte als JSON:
-      {
-        "titel": "Thema",
-        "fach": "Fach",
-        "aufgaben": [ { "text": "Frage mit itemize", "be": 5, "loesung": "Lösung" } ]
-      }
+      JSON Output: { "titel": "...", "fach": "...", "aufgaben": [...] }
     `;
 
     const result = await model.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
     const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    
-    let schulaufgabe;
-    try {
-        schulaufgabe = JSON.parse(cleanedText);
-    } catch (e) {
-        throw new Error("KI hat kein gültiges JSON geliefert.");
-    }
+    const schulaufgabe = JSON.parse(cleanedText);
 
-    console.log(`-> Generiert: "${schulaufgabe.titel}"`);
+    console.log(`-> Generiert: ${schulaufgabe.titel}`);
     
-    console.log("-> Erstelle LaTeX Code...");
-    
-    // --- UPDATE: enumitem Paket hinzugefügt ---
+    // LaTeX Datei erstellen
     const texContent = `
       \\documentclass[a4paper,12pt]{article}
       \\usepackage[utf8]{inputenc}
@@ -92,67 +92,58 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
       \\usepackage{amssymb}
       \\usepackage{fancyhdr}
       \\usepackage{geometry}
-      \\usepackage{enumitem} % WICHTIG für a) b) c) Listen
+      \\usepackage{enumitem}
       \\geometry{a4paper, top=25mm, left=25mm, right=25mm, bottom=25mm}
-      
       \\pagestyle{fancy}
       \\lhead{\\textbf{efectoTEC}}
       \\rhead{Fach: ${escapeLatex(schulaufgabe.fach)}}
       
       \\begin{document}
       \\section*{${escapeLatex(schulaufgabe.titel)}}
-      \\textbf{Datum:} \\today \\hfill \\textbf{Name:} \\underline{\\hspace{5cm}}
-      \\vspace{1cm}
       
       ${schulaufgabe.aufgaben.map((a, i) => `
         \\subsection*{Aufgabe ${i+1} (${a.be} BE)}
         ${a.text}
       `).join('')}
       
-      \\vspace{2cm}
-      \\hrule
-      \\vspace{0.5cm}
-      \\section*{Lösungsschlüssel}
-      ${schulaufgabe.aufgaben.map((a, i) => `
-        \\textbf{Aufgabe ${i+1}:} ${a.loesung} \\par
-        \\vspace{0.2cm}
-      `).join('\n')}
       \\end{document}
     `;
     
-    texFilename = `schulaufgabe_${Date.now()}.tex`;
+    // WICHTIG: Wir schreiben die .tex Datei auch nach /tmp
+    const baseName = `schulaufgabe_${Date.now()}`;
+    texFilename = path.join(tempDir, `${baseName}.tex`);
     fs.writeFileSync(texFilename, texContent);
 
-    console.log("-> Starte PDF-Druck (pdflatex)...");
+    console.log("-> Starte PDF-Druck...");
     
-    exec(`pdflatex -interaction=nonstopmode ${texFilename}`, (error, stdout, stderr) => {
+    // WICHTIG: Wir sagen pdflatex, dass es im /tmp Ordner arbeiten soll (-output-directory)
+    const cmd = `pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texFilename}"`;
+    
+    exec(cmd, (error, stdout, stderr) => {
       if (error) {
-        console.error("!!! PDF FEHLER !!!");
-        console.error(stdout.slice(-500)); 
-        return res.status(500).send("Fehler beim PDF-Erstellen.");
+        console.error("PDF FEHLER:", stdout.slice(-200));
+        return res.status(500).send("Fehler beim PDF Druck.");
       }
       
-      console.log("-> ERFOLG! PDF wird gesendet.");
-      pdfFilename = texFilename.replace('.tex', '.pdf');
+      pdfFilename = path.join(tempDir, `${baseName}.pdf`);
+      console.log("-> Sende PDF...");
       
       res.download(pdfFilename, (err) => {
-        if (texFilename && fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
-        if (pdfFilename && fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
-        if (imagePath && fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-        const logFile = texFilename.replace('.tex', '.log');
-        const auxFile = texFilename.replace('.tex', '.aux');
-        if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
-        if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
+         // Aufräumen
+         try {
+             if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
+             if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
+             if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+         } catch(e) {}
       });
     });
 
   } catch (err) {
-    console.error("CRITICAL ERROR:", err);
+    console.error("ERROR:", err);
     res.status(500).send("Server Fehler: " + err.message);
-    if (imagePath && fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
   }
 });
 
 app.listen(port, () => {
-  console.log(`efectoTEC SERVER LÄUFT (Modell: ${MODEL_NAME})`);
+  console.log(`efectoTEC Server läuft auf Port ${port}`);
 });
