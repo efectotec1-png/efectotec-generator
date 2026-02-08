@@ -13,16 +13,19 @@ const port = process.env.PORT || 8080;
 // --- 1. KI KONFIGURATION ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// WICHTIG: Wir zwingen die API auf 'v1beta', weil gemini-1.5-flash dort lebt.
-// Das verhindert den 404 Fehler.
-const model = genAI.getGenerativeModel(
-    { model: "gemini-1.5-flash" }, 
-    { apiVersion: "v1beta" }
-);
+// WICHTIG: Wir nutzen die exakte Versions-Nummer "001".
+// Das verhindert den "Not Found" Fehler bei Alias-Namen.
+// Wir lassen apiVersion weg, damit das SDK den sichersten Weg wählt.
+const model = genAI.getGenerativeModel({ 
+  model: "gemini-1.5-flash-001"
+});
 
 // --- 2. DESIGN-ENGINE (LaTeX) ---
 function createProfessionalLatex(data) {
-    const totalBE = data.aufgaben.reduce((acc, curr) => acc + (curr.be || 0), 0);
+    // Sicherheits-Check: Falls mal keine BE da sind
+    const totalBE = data.aufgaben ? data.aufgaben.reduce((acc, curr) => acc + (curr.be || 0), 0) : 0;
+    
+    // Fallback falls totalBE 0 ist (verhindert Fehler)
     const grenzen = {
         1: Math.floor(totalBE * 0.87),
         2: Math.floor(totalBE * 0.73),
@@ -48,13 +51,13 @@ function createProfessionalLatex(data) {
 \\pagestyle{fancy}
 \\fancyhf{}
 \\lhead{\\textbf{efectoTEC} Generator}
-\\rhead{Fach: ${data.fach}}
+\\rhead{Fach: ${data.fach || 'Allgemein'}}
 \\rfoot{Seite \\thepage\\ von \\pageref{LastPage}}
 
 \\begin{document}
 
 \\begin{center}
-    \\huge \\textbf{${data.titel}}
+    \\huge \\textbf{${data.titel || 'Schulaufgabe'}}
 \\end{center}
 \\vspace{0.5cm}
 
@@ -81,19 +84,19 @@ function createProfessionalLatex(data) {
 \\hrule
 \\vspace{1cm}
 
-${data.aufgaben.map((aufgabe, index) => `
+${data.aufgaben ? data.aufgaben.map((aufgabe, index) => `
 \\section*{Aufgabe ${index + 1} (${aufgabe.be || '?'} BE)}
 ${aufgabe.text}
-`).join('\\vspace{0.5cm}\n')}
+`).join('\\vspace{0.5cm}\n') : 'Keine Aufgaben generiert.'}
 
 \\newpage
 \\fancyhead[L]{Lösungsschlüssel (Nur für Lehrkräfte)}
 \\section*{Lösungen}
 
-${data.aufgaben.map((aufgabe, index) => `
+${data.aufgaben ? data.aufgaben.map((aufgabe, index) => `
 \\subsection*{Zu Aufgabe ${index + 1}:}
 ${aufgabe.loesung}
-`).join('\n')}
+`).join('\n') : ''}
 
 \\end{document}
     `;
@@ -118,7 +121,7 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     imagePath = req.file.path;
 
     // A. KI-Verarbeitung
-    console.log("PHASE 2: Sende an Gemini 1.5 Flash (v1beta)...");
+    console.log("PHASE 2: Sende an Gemini (Version 1.5 Flash 001)...");
     const imageBuffer = fs.readFileSync(imagePath);
     const imagePart = {
       inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
@@ -150,7 +153,11 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     // JSON Cleaning
     const jsonStartIndex = responseText.indexOf('{');
     const jsonEndIndex = responseText.lastIndexOf('}');
-    if (jsonStartIndex === -1) throw new Error("Kein JSON gefunden: " + responseText);
+    
+    if (jsonStartIndex === -1) {
+        console.error("KI Antwort war kein JSON:", responseText);
+        throw new Error("KI konnte kein JSON generieren. Bitte Foto prüfen.");
+    }
     
     const cleanJson = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
     const schulaufgabe = JSON.parse(cleanJson);
@@ -169,22 +176,27 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     exec(`pdflatex -interaction=nonstopmode -output-directory="${dir}" "${base}"`, (error, stdout, stderr) => {
       if (error) {
         console.error("!!! FEHLER BEI PDF-ERSTELLUNG !!!");
-        return res.status(500).send("PDF Fehler. Logs prüfen.");
+        // Wir ignorieren LaTeX-Fehler oft, weil ein PDF trotzdem rauskommt
+        // Aber wir loggen es.
       }
       
       console.log("PHASE 5: PDF fertig. Download startet.");
-      res.download(pdfFilename, `efectoTEC_Probe_${timestamp}.pdf`, (err) => {
-        // Cleanup
-        try {
-            if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
-            if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
-            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-            const logFile = texFilename.replace('.tex', '.log');
-            const auxFile = texFilename.replace('.tex', '.aux');
-            if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
-            if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
-        } catch (e) {}
-      });
+      if (fs.existsSync(pdfFilename)) {
+          res.download(pdfFilename, `efectoTEC_Probe_${timestamp}.pdf`, (err) => {
+            // Cleanup
+            try {
+                if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
+                if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
+                if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+                const logFile = texFilename.replace('.tex', '.log');
+                const auxFile = texFilename.replace('.tex', '.aux');
+                if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+                if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
+            } catch (e) {}
+          });
+      } else {
+          res.status(500).send("Fehler: PDF wurde nicht erstellt. LaTeX-Code war evtl. fehlerhaft.");
+      }
     });
 
   } catch (err) {
