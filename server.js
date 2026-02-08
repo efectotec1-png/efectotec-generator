@@ -7,24 +7,22 @@ const path = require('path');
 require('dotenv').config();
 
 const app = express();
-// Upload-Speicherort konfigurieren
 const upload = multer({ dest: 'uploads/' }); 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080; // WICHTIG für Cloud Run!
 
-// --- 1. KI KONFIGURATION ---
+// --- 1. KI KONFIGURATION (STABLE VERSION) ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// Upgrade auf Flash 2.0 für Speed & Qualität (entsprechend Umsetzungsbericht)
+
+// Wir nutzen 1.5 Flash, weil es den JSON-Modus perfekt beherrscht.
+// Das verhindert Abstürze bei der PDF-Erstellung.
 const model = genAI.getGenerativeModel({ 
-  model: "gemini-2.0-flash", 
+  model: "gemini-1.5-flash", 
   generationConfig: { responseMimeType: "application/json" } 
 });
 
-// --- 2. DIE DESIGN-ENGINE (ehemals tex-generator.js) ---
+// --- 2. DESIGN-ENGINE (Dein hochwertiges Layout) ---
 function createProfessionalLatex(data) {
-    // A. Gesamt-BE (Punkte) berechnen für den Notenschlüssel
     const totalBE = data.aufgaben.reduce((acc, curr) => acc + (curr.be || 0), 0);
-
-    // B. Notenschlüssel berechnen (Bayerischer Standard-Algorithmus)
     const grenzen = {
         1: Math.floor(totalBE * 0.87),
         2: Math.floor(totalBE * 0.73),
@@ -33,8 +31,6 @@ function createProfessionalLatex(data) {
         5: Math.floor(totalBE * 0.18)
     };
 
-    // C. Das LaTeX-Template zusammenbauen
-    // Hier nutzen wir Packages für professionelles Layout (fancyhdr, tabularx)
     return `
 \\documentclass[a4paper,12pt]{article}
 \\usepackage[utf8]{inputenc}
@@ -47,10 +43,8 @@ function createProfessionalLatex(data) {
 \\usepackage{graphicx}
 \\usepackage{lastpage}
 
-% Seitenränder analog DIN 5008 Annäherung
 \\geometry{a4paper, top=25mm, left=20mm, right=20mm, bottom=20mm}
 
-% Kopfzeile mit Branding
 \\pagestyle{fancy}
 \\fancyhf{}
 \\lhead{\\textbf{efectoTEC} Generator}
@@ -59,13 +53,11 @@ function createProfessionalLatex(data) {
 
 \\begin{document}
 
-% --- TITELBEREICH ---
 \\begin{center}
     \\huge \\textbf{${data.titel}}
 \\end{center}
 \\vspace{0.5cm}
 
-% --- SCHÜLERDATEN & NOTENSCHLÜSSEL ---
 \\noindent
 \\textbf{Name:} \\underline{\\hspace{6cm}} \\hfill \\textbf{Datum:} \\today \\\\[0.5cm]
 
@@ -89,13 +81,11 @@ function createProfessionalLatex(data) {
 \\hrule
 \\vspace{1cm}
 
-% --- AUFGABENTEIL ---
 ${data.aufgaben.map((aufgabe, index) => `
 \\section*{Aufgabe ${index + 1} (${aufgabe.be || '?'} BE)}
 ${aufgabe.text}
 `).join('\\vspace{0.5cm}\n')}
 
-% --- LÖSUNGSBLATT (Neue Seite) ---
 \\newpage
 \\fancyhead[L]{Lösungsschlüssel (Nur für Lehrkräfte)}
 \\section*{Lösungen}
@@ -110,13 +100,10 @@ ${aufgabe.loesung}
 }
 
 // --- 3. ROUTEN ---
-
-// Startseite
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Hauptprozess: Upload -> KI -> LaTeX -> PDF
 app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
   let imagePath = null;
   let texFilename = null;
@@ -127,13 +114,11 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     console.log("-----------------------------------------");
     console.log("PHASE 1: Bild-Upload empfangen");
     
-    if (!req.file) {
-      return res.status(400).send("Fehler: Kein Bild hochgeladen.");
-    }
+    if (!req.file) return res.status(400).send("Fehler: Kein Bild hochgeladen.");
     imagePath = req.file.path;
 
     // A. KI-Verarbeitung
-    console.log("PHASE 2: Sende an Gemini AI...");
+    console.log("PHASE 2: Sende an Gemini 1.5 Flash...");
     const imageBuffer = fs.readFileSync(imagePath);
     const imagePart = {
       inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
@@ -142,7 +127,6 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     const prompt = `
       Du bist ein bayerischer Gymnasiallehrer.
       Erstelle aus diesem Hefteintrag eine Schulaufgabe (Prüfung).
-      
       Regeln:
       1. Nutze LaTeX für Formeln (z.B. $x^2$).
       2. Erstelle eine Mischung aus Rechenaufgaben und Verständnisfragen (AFB I-III).
@@ -160,49 +144,34 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
 
     const result = await model.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
-    
-    // JSON Cleaning (entfernt Markdown ```json Blöcke)
     const cleanJson = responseText.replace(/```json|```/g, '').trim();
     const schulaufgabe = JSON.parse(cleanJson);
     console.log(`   -> KI Generierung erfolgreich: "${schulaufgabe.titel}"`);
 
-    // B. LaTeX Generierung (Mit dem neuen Design)
-    console.log("PHASE 3: Erzeuge professionelles LaTeX-Layout...");
+    // B. LaTeX
+    console.log("PHASE 3: Erzeuge LaTeX...");
     const texContent = createProfessionalLatex(schulaufgabe);
-    
-    // Wir nutzen absolute Pfade, um Fehler zu vermeiden
     texFilename = path.resolve(__dirname, `schulaufgabe_${timestamp}.tex`);
     pdfFilename = path.resolve(__dirname, `schulaufgabe_${timestamp}.pdf`);
-    
     fs.writeFileSync(texFilename, texContent);
 
-    // C. PDF Engine (pdflatex)
-    console.log("PHASE 4: Starte PDF-Engine (lokal)...");
+    // C. PDF Engine
+    console.log("PHASE 4: Starte PDF-Engine...");
     const dir = path.dirname(texFilename);
     const base = path.basename(texFilename);
 
-    // WICHTIG: Hier scheitert es, wenn kein MiKTeX da ist.
-    // Wir fangen den Fehler sauber ab.
     exec(`pdflatex -interaction=nonstopmode -output-directory="${dir}" "${base}"`, (error, stdout, stderr) => {
       if (error) {
-        console.error("!!! FEHLER BEI PDF-ERSTELLUNG !!!");
-        console.error("Ursache: Wahrscheinlich ist kein 'pdflatex' installiert oder nicht im PATH.");
-        console.error("Details:", stdout.slice(-200)); // Letzte 200 Zeichen des Logs
-        return res.status(500).send(`
-          <h1>Server-Fehler: PDF-Engine nicht gefunden</h1>
-          <p>Der Server konnte das PDF nicht bauen. Das liegt meist daran, dass auf dem Host-Computer kein LaTeX (MiKTeX/TeXLive) installiert ist.</p>
-          <p><b>Für den Admin:</b> Bitte Phase 2 (Docker) einleiten oder MiKTeX prüfen.</p>
-          <pre>${error.message}</pre>
-        `);
+        console.error("!!! FEHLER BEI PDF-ERSTELLUNG !!!", stdout.slice(-200));
+        return res.status(500).send("Server-Fehler: PDF konnte nicht erstellt werden. Logs prüfen.");
       }
       
       console.log("PHASE 5: PDF fertig. Sende an Client.");
       res.download(pdfFilename, `efectoTEC_Probe_${timestamp}.pdf`, (err) => {
-        // CLEANUP (Datenschutz)
+        // Cleanup
         if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
         if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
         if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-        // Aufräumen der LaTeX Hilfsdateien (.log, .aux)
         const logFile = texFilename.replace('.tex', '.log');
         const auxFile = texFilename.replace('.tex', '.aux');
         if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
@@ -218,9 +187,5 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`\n=========================================`);
-  console.log(`   efectoTEC PROTOTYP: READY`);
-  console.log(`   Port: ${port}`);
-  console.log(`   Design-Modus: PROFESSIONAL`);
-  console.log(`=========================================\n`);
+  console.log(`efectoTEC Server läuft auf Port ${port}`);
 });
