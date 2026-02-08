@@ -13,14 +13,14 @@ const port = process.env.PORT || 8080;
 // --- 1. KI KONFIGURATION ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// WICHTIGE ÄNDERUNG: Wir entfernen "responseMimeType", da dies auf V1-Servern zu Abstürzen führt.
-// Wir nutzen das stabile Modell 1.5 Flash.
-const model = genAI.getGenerativeModel({ 
-  model: "gemini-1.5-flash"
-  // KEIN generationConfig hier! Das verursacht den Fehler.
-});
+// WICHTIG: Wir zwingen die API auf 'v1beta', weil gemini-1.5-flash dort lebt.
+// Das verhindert den 404 Fehler.
+const model = genAI.getGenerativeModel(
+    { model: "gemini-1.5-flash" }, 
+    { apiVersion: "v1beta" }
+);
 
-// --- 2. DESIGN-ENGINE ---
+// --- 2. DESIGN-ENGINE (LaTeX) ---
 function createProfessionalLatex(data) {
     const totalBE = data.aufgaben.reduce((acc, curr) => acc + (curr.be || 0), 0);
     const grenzen = {
@@ -118,18 +118,17 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
     imagePath = req.file.path;
 
     // A. KI-Verarbeitung
-    console.log("PHASE 2: Sende an Gemini...");
+    console.log("PHASE 2: Sende an Gemini 1.5 Flash (v1beta)...");
     const imageBuffer = fs.readFileSync(imagePath);
     const imagePart = {
       inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
     };
 
-    // PROMPT UPDATE: Wir zwingen die KI hier per Text zu JSON, statt per Config.
     const prompt = `
       Du bist ein bayerischer Gymnasiallehrer.
       Erstelle aus diesem Hefteintrag eine Schulaufgabe (Prüfung).
       
-      WICHTIG: Antworte AUSSCHLIESSLICH mit reinem JSON. Kein Markdown, kein 'json'-Tag am Anfang.
+      ANTWORTE NUR MIT VALIDEM JSON. KEIN MARKDOWN.
       Struktur:
       {
         "titel": "Thema",
@@ -142,45 +141,38 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
       Regeln:
       1. Nutze LaTeX für Formeln (z.B. $x^2$).
       2. Erstelle eine Mischung aus Rechenaufgaben und Verständnisfragen (AFB I-III).
-      3. Sei streng aber fair bei den BE (Bewertungseinheiten).
+      3. Sei streng aber fair bei den BE.
     `;
 
     const result = await model.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
     
-    // Robuster JSON Cleaner (Entfernt alles, was nicht JSON ist)
-    // Wir suchen nach der ersten '{' und der letzten '}'
+    // JSON Cleaning
     const jsonStartIndex = responseText.indexOf('{');
     const jsonEndIndex = responseText.lastIndexOf('}');
-    
-    if (jsonStartIndex === -1 || jsonEndIndex === -1) {
-        throw new Error("KI hat kein gültiges JSON geliefert: " + responseText);
-    }
+    if (jsonStartIndex === -1) throw new Error("Kein JSON gefunden: " + responseText);
     
     const cleanJson = responseText.substring(jsonStartIndex, jsonEndIndex + 1);
     const schulaufgabe = JSON.parse(cleanJson);
     console.log(`   -> KI Generierung erfolgreich: "${schulaufgabe.titel}"`);
 
-    // B. LaTeX
-    console.log("PHASE 3: Erzeuge LaTeX...");
+    // B. LaTeX & PDF
+    console.log("PHASE 3: Erzeuge PDF...");
     const texContent = createProfessionalLatex(schulaufgabe);
     texFilename = path.resolve(__dirname, `schulaufgabe_${timestamp}.tex`);
     pdfFilename = path.resolve(__dirname, `schulaufgabe_${timestamp}.pdf`);
     fs.writeFileSync(texFilename, texContent);
 
-    // C. PDF Engine
-    console.log("PHASE 4: Starte PDF-Engine...");
     const dir = path.dirname(texFilename);
     const base = path.basename(texFilename);
 
     exec(`pdflatex -interaction=nonstopmode -output-directory="${dir}" "${base}"`, (error, stdout, stderr) => {
       if (error) {
         console.error("!!! FEHLER BEI PDF-ERSTELLUNG !!!");
-        // Wir senden dem Nutzer zumindest den Fehler, damit er weiß was los ist
-        return res.status(500).send("Server-Fehler bei PDF-Erstellung. Logs prüfen.");
+        return res.status(500).send("PDF Fehler. Logs prüfen.");
       }
       
-      console.log("PHASE 5: PDF fertig. Sende an Client.");
+      console.log("PHASE 5: PDF fertig. Download startet.");
       res.download(pdfFilename, `efectoTEC_Probe_${timestamp}.pdf`, (err) => {
         // Cleanup
         try {
@@ -191,7 +183,7 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
             const auxFile = texFilename.replace('.tex', '.aux');
             if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
             if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
-        } catch (e) { console.error("Cleanup Error:", e); }
+        } catch (e) {}
       });
     });
 
