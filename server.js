@@ -9,6 +9,8 @@ require('dotenv').config();
 
 const app = express();
 const port = process.env.PORT || 8080;
+
+// --- WICHTIG: SETUP FÜR CLOUD RUN ---
 const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'efectotec_uploads');
 
@@ -17,20 +19,40 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 const upload = multer({ dest: uploadDir });
+
+// KI Config
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ 
   model: "gemini-2.5-flash", 
   generationConfig: { responseMimeType: "application/json", temperature: 0.3 } 
 });
 
+// Helper
 function escapeLatex(text) {
   if (typeof text !== 'string') return text || "";
   return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/~/g, '\\textasciitilde ').replace(/\^/g, '\\textasciicircum ').replace(/{/g, '\\{').replace(/}/g, '\\}');
 }
 
-// --- ROUTE 1: ANALYSE ---
+// ==========================================
+// 1. DIE STARSEITE (DER FIX FÜR "CANNOT GET /")
+// ==========================================
+app.get('/', (req, res) => {
+    // Wir senden explizit die index.html aus dem aktuellen Ordner
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Optional: Statische Dateien (falls wir später CSS auslagern)
+app.use(express.static(path.join(__dirname, 'public')));
+
+
+// ==========================================
+// 2. API ROUTEN
+// ==========================================
+
+// --- ROUTE: ANALYSE ---
 app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     try {
+        console.log("Analyse gestartet...");
         if (!req.files || req.files.length === 0) return res.json({}); 
 
         const imageParts = req.files.map(file => ({
@@ -47,23 +69,24 @@ app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
         const result = await model.generateContent([prompt, ...imageParts]);
         const analysis = JSON.parse(result.response.text().replace(/```json/g, '').replace(/```/g, '').trim());
         
+        // Cleanup
         req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
         res.json(analysis);
 
     } catch (err) {
         console.error("Analyse Fehler:", err);
-        res.json({}); 
+        res.json({}); // Leeres JSON bei Fehler, damit Frontend nicht crasht
     }
 });
 
-// --- ROUTE 2: GENERIERUNG ---
+// --- ROUTE: GENERIERUNG ---
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
   let texFilename;
+  console.log("Generierung gestartet...");
 
   try {
     const { userFach, userKlasse, userThema } = req.body;
-    console.log(`Job: ${userFach} Kl.${userKlasse} - ${userThema}`);
-
+    
     let imageParts = [];
     if (req.files && req.files.length > 0) {
         imageParts = req.files.map(file => ({
@@ -77,9 +100,8 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
       Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
       
       VORGABEN:
-      1. LaTeX für Formeln. KEIN Markdown im LaTeX.
+      1. LaTeX für Formeln. KEIN Markdown im LaTeX-Code.
       2. Operatoren nach LehrplanPLUS.
-      3. Strukturierte Ausgabe.
       
       JSON OUTPUT:
       {
@@ -125,7 +147,7 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     
     exec(cmd, (error, stdout) => {
       if (error) {
-        // Log an Frontend senden!
+        console.error("LaTeX Fehler:", stdout.slice(-300));
         return res.status(500).send("LaTeX Fehler:\n" + stdout.slice(-300));
       }
       
@@ -143,8 +165,9 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     });
 
   } catch (err) {
+    console.error("Server Crash:", err);
     res.status(500).send("Server Fehler: " + err.message);
   }
 });
 
-app.listen(port, () => console.log(`Start auf ${port}`));
+app.listen(port, () => console.log(`Start auf Port ${port}`));
