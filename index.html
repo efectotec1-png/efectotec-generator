@@ -4,34 +4,158 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>efectoTEC Generator</title>
-    <style>
-        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; margin: 0; }
-        .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); text-align: center; width: 350px; }
-        h1 { color: #1a73e8; margin-bottom: 0.5rem; }
-        p { color: #666; margin-bottom: 2rem; }
-        .upload-btn { background: #1a73e8; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; width: 100%; transition: background 0.3s; }
-        .upload-btn:hover { background: #1557b0; }
-        input[type="file"] { margin-bottom: 20px; }
-        .loader { display: none; margin-top: 20px; color: #1a73e8; font-weight: bold; }
-    </style>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body>
-    <div class="card">
-        <h1>efectoTEC</h1>
-        <p>Schulaufgaben-Generator (G9)</p>
-        
-        <form action="/generate" method="POST" enctype="multipart/form-data" onsubmit="document.querySelector('.loader').style.display='block'">
-            <div style="margin-bottom: 20px; text-align: left;">
-                <label for="hefteintrag"><b>1. Foto wählen:</b></label><br>
-                <input type="file" name="hefteintrag" accept="image/*" required style="margin-top: 10px;">
-            </div>
-            <button type="submit" class="upload-btn">Schulaufgabe generieren</button>
-        </form>
+<body class="bg-slate-50 min-h-screen flex items-center justify-center font-sans">
 
-        <div class="loader">
-            ⏳ KI arbeitet... Bitte warten.<br>
-            (Das dauert ca. 10-20 Sekunden)
+    <div class="bg-white p-8 rounded-xl shadow-xl w-full max-w-md border border-slate-200">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-blue-600 mb-2">efectoTEC</h1>
+            <p class="text-slate-500">Bayerischer Schulaufgaben-Generator</p>
+        </div>
+
+        <div id="step-upload">
+            <div class="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center hover:bg-blue-50 transition cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                <i class="fas fa-cloud-upload-alt text-4xl text-blue-400 mb-4"></i>
+                <p class="text-slate-600 font-medium">Hefteinträge hier ablegen</p>
+                <p class="text-xs text-slate-400 mt-2">Max. 3 Bilder (JPG, PNG)</p>
+                <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="handleFiles()">
+            </div>
+            
+            <div id="preview-grid" class="grid grid-cols-3 gap-2 mt-4"></div>
+
+            <button onclick="startAnalysis()" id="btn-analyze" class="w-full mt-6 bg-blue-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition hidden disabled:opacity-50">
+                <i class="fas fa-magic mr-2"></i> Analysieren
+            </button>
+        </div>
+
+        <div id="loading" class="hidden text-center py-8">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p id="loading-text" class="text-blue-600 font-medium animate-pulse">KI analysiert Lehrplan...</p>
+        </div>
+
+        <div id="step-config" class="hidden">
+            <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                <p class="text-green-700 text-sm"><i class="fas fa-check-circle mr-2"></i>Analyse erfolgreich!</p>
+            </div>
+
+            <form id="generateForm" onsubmit="submitGeneration(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">Fach</label>
+                        <input type="text" id="input-fach" name="userFach" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 px-4 py-2 border">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">Klasse</label>
+                            <input type="text" id="input-klasse" name="userKlasse" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 px-4 py-2 border">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700">Dauer</label>
+                            <input type="text" value="60 Min" disabled class="mt-1 block w-full rounded-md border-slate-300 bg-slate-100 text-slate-500 px-4 py-2 border">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700">Thema</label>
+                        <input type="text" id="input-thema" name="userThema" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 px-4 py-2 border">
+                    </div>
+                </div>
+
+                <button type="submit" class="w-full mt-8 bg-green-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-green-700 transition">
+                    <i class="fas fa-file-pdf mr-2"></i> Schulaufgabe erstellen
+                </button>
+            </form>
         </div>
     </div>
+
+    <script>
+        let selectedFiles = [];
+
+        function handleFiles() {
+            const input = document.getElementById('fileInput');
+            const files = Array.from(input.files);
+            if (files.length === 0) return;
+
+            selectedFiles = files.slice(0, 3); // Max 3
+            const grid = document.getElementById('preview-grid');
+            grid.innerHTML = '';
+
+            selectedFiles.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const div = document.createElement('div');
+                    div.className = 'aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200';
+                    div.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover">`;
+                    grid.appendChild(div);
+                };
+                reader.readAsDataURL(file);
+            });
+
+            document.getElementById('btn-analyze').classList.remove('hidden');
+        }
+
+        async function startAnalysis() {
+            // UI Switch
+            document.getElementById('step-upload').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('loading-text').innerText = "Analysiere Handschrift & Thema...";
+
+            const formData = new FormData();
+            selectedFiles.forEach(file => formData.append('hefteintrag', file));
+
+            try {
+                const res = await fetch('/analyze', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                // Fülle Formular
+                document.getElementById('input-fach').value = data.fach || "Mathematik";
+                document.getElementById('input-klasse').value = data.klasse || "9";
+                document.getElementById('input-thema').value = data.thema || "Allgemein";
+
+                // Zeige Formular
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step-config').classList.remove('hidden');
+
+            } catch (err) {
+                alert("Fehler bei der Analyse: " + err.message);
+                location.reload();
+            }
+        }
+
+        async function submitGeneration(e) {
+            e.preventDefault();
+            
+            // UI Switch
+            document.getElementById('step-config').classList.add('hidden');
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('loading-text').innerText = "Generiere LaTeX PDF (ca. 20s)...";
+
+            const formData = new FormData(document.getElementById('generateForm'));
+            // WICHTIG: Wir senden die Bilder nochmal mit, da der Server stateless ist
+            selectedFiles.forEach(file => formData.append('hefteintrag', file));
+
+            try {
+                const res = await fetch('/generate', { method: 'POST', body: formData });
+                if (!res.ok) throw new Error("Server Fehler");
+                
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = "Schulaufgabe.pdf";
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                
+                // Reset
+                setTimeout(() => location.reload(), 2000);
+
+            } catch (err) {
+                alert("Fehler beim PDF Druck.");
+                location.reload();
+            }
+        }
+    </script>
 </body>
 </html>

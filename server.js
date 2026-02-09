@@ -4,173 +4,172 @@ const fs = require('fs');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { exec } = require('child_process');
 const path = require('path');
-const os = require('os'); // ZWINGEND für Cloud Run
+const os = require('os');
 require('dotenv').config();
 
 const app = express();
-
-// --- 1. CLOUD RUN CONFIG ---
-// Google Cloud weist dynamisch einen Port zu (meist 8080).
 const port = process.env.PORT || 8080;
-
-// WICHTIG: In Cloud Run (Serverless) dürfen wir nur nach /tmp schreiben.
-// Alle anderen Ordner sind Read-Only!
-const tempDir = os.tmpdir(); 
+const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'efectotec_uploads');
 
-// Erstelle den Upload-Ordner im temporären Verzeichnis, falls nicht vorhanden
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer konfiguieren: Speicherort ist das tempDir
+// Multer Config: Erlaubt bis zu 3 Bilder gleichzeitig
 const upload = multer({ dest: uploadDir });
 
-// --- 2. KI KONFIGURATION ---
-const MODEL_NAME = "gemini-2.5-flash"; // Das effizienteste Modell
+// KI Config
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ 
-  model: MODEL_NAME, 
-  generationConfig: { responseMimeType: "application/json", temperature: 0.2 } 
+  model: "gemini-2.5-flash", 
+  generationConfig: { responseMimeType: "application/json", temperature: 0.3 } 
 });
 
-// Helper: LaTeX Cleaning für Sicherheit
+// Helper
 function escapeLatex(text) {
   if (typeof text !== 'string') return text;
-  return text
-    .replace(/\\/g, '') 
-    .replace(/([&%$#_])/g, '\\$1') // Maskiert Sonderzeichen, die LaTeX crashen lassen
-    .replace(/~/g, '\\textasciitilde ')
-    .replace(/\^/g, '\\textasciicircum ');
+  return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/~/g, '\\textasciitilde ').replace(/\^/g, '\\textasciicircum ');
 }
 
-// --- 3. ROUTEN ---
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+// --- ROUTE 1: ANALYSE (Der "Magic Pre-Check") ---
+app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
+    try {
+        if (!req.files || req.files.length === 0) return res.status(400).json({ error: "Keine Bilder." });
+
+        console.log(`-> Analyse-Request: ${req.files.length} Bilder`);
+
+        // Bilder für Gemini vorbereiten
+        const imageParts = req.files.map(file => ({
+            inlineData: {
+                data: fs.readFileSync(file.path).toString("base64"),
+                mimeType: "image/jpeg"
+            }
+        }));
+
+        const prompt = `
+            Analysiere diese Hefteinträge/Skizzen.
+            Identifiziere:
+            1. Das Schulfach (z.B. Mathematik, Physik).
+            2. Die vermutliche Klasse (Bayerisches Gymnasium G9, z.B. "9").
+            3. Das konkrete Thema (z.B. "Quadratische Funktionen").
+            
+            Antworte NUR mit JSON:
+            { "fach": "...", "klasse": "...", "thema": "..." }
+        `;
+
+        const result = await model.generateContent([prompt, ...imageParts]);
+        const responseText = result.response.text();
+        const analysis = JSON.parse(responseText.replace(/```json/g, '').replace(/```/g, '').trim());
+        
+        console.log("-> Analyse Ergebnis:", analysis);
+        
+        // Cleanup sofort, wir brauchen die Bilder erst beim Generate wieder
+        req.files.forEach(f => fs.unlinkSync(f.path));
+
+        res.json(analysis);
+
+    } catch (err) {
+        console.error("Analyse Fehler:", err);
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
-  // Wir definieren die Pfade hier, damit wir sie im 'finally' Block aufräumen können
-  let texFilename = null;
-  let pdfFilename = null;
-  let imagePath = null;
+
+// --- ROUTE 2: GENERIERUNG (Der "Heavy Lifter") ---
+app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
+  let texFilename, pdfFilename;
 
   try {
-    console.log("-----------------------------------------");
-    console.log(`NEUE ANFRAGE (Modell: ${MODEL_NAME})`);
-    
-    if (!req.file) {
-      return res.status(400).send("Fehler: Kein Bild hochgeladen.");
-    }
+    // Wir holen uns die bestätigten Daten vom Frontend
+    const { userFach, userKlasse, userThema } = req.body;
+    console.log(`-> Generiere: ${userFach}, Kl. ${userKlasse}, Thema: ${userThema}`);
 
-    // A) Bild einlesen
-    imagePath = req.file.path;
-    const imageBuffer = fs.readFileSync(imagePath);
-    const imagePart = {
-      inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
-    };
+    const imageParts = req.files.map(file => ({
+        inlineData: { data: fs.readFileSync(file.path).toString("base64"), mimeType: "image/jpeg" }
+    }));
 
-    // B) Prompting
+    // Der präzise Lehrplan-Prompt
     const prompt = `
       Rolle: Bayerischer Gymnasiallehrer (G9).
-      Aufgabe: Erstelle eine Schulaufgabe aus diesem Bild.
+      Aufgabe: Erstelle eine Schulaufgabe für das Fach ${userFach}, Klasse ${userKlasse}.
+      Thema: ${userThema}.
+      Basis: Nutze die hochgeladenen Bilder als Inspiration für Aufgabenstellungen, aber halte dich strikt an den LehrplanPLUS für Klasse ${userKlasse}.
       
-      REGELN:
-      1. Ausgabe MUSS valides JSON sein.
-      2. Nutze LaTeX für Formeln (z.B. $x^2$).
-      3. Nutze die 'enumerate'-Umgebung für Teilaufgaben (a, b).
+      ANFORDERUNGEN:
+      1. Umfang: 60 Minuten (ca. 28-32 BE).
+      2. Niveau: Mix aus AFB I (30%), II (50%), III (20%).
+      3. Format: Valides JSON.
       
-      JSON SCHEMA:
+      JSON OUTPUT:
       {
-        "titel": "Thema der Probe",
-        "fach": "Mathematik",
+        "titel": "Schulaufgabe: ${userThema}",
+        "fach": "${userFach}",
+        "klasse": "${userKlasse}",
+        "zeit": "60 Min",
+        "hilfsmittel": "Taschenrechner, Merkhilfe",
         "aufgaben": [
-          { "text": "Aufgabentext in LaTeX", "be": 4, "loesung": "Lösungsweg" }
-        ]
+          { "text": "LaTeX Code hier", "be": 4, "afb": "I" }
+        ],
+        "loesung": "LaTeX Lösungsskizze"
       }
     `;
 
-    console.log("-> Sende an Gemini...");
-    const result = await model.generateContent([prompt, imagePart]);
-    const responseText = result.response.text();
-    
-    // JSON Cleaning (falls Markdown-Blöcke ```json dabei sind)
-    const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const schulaufgabe = JSON.parse(cleanedText);
-    
-    console.log("-> Generiert: " + schulaufgabe.titel);
+    const result = await model.generateContent([prompt, ...imageParts]);
+    const schulaufgabe = JSON.parse(result.response.text().replace(/```json/g, '').replace(/```/g, '').trim());
 
-    // C) LaTeX Template bauen
+    // LaTeX Template
     const texContent = `
       \\documentclass[a4paper,12pt]{article}
       \\usepackage[utf8]{inputenc}
       \\usepackage[ngerman]{babel}
-      \\usepackage{amsmath}
-      \\usepackage{amssymb}
-      \\usepackage{geometry}
-      \\usepackage{fancyhdr}
-      \\usepackage{enumitem} 
-      
-      \\geometry{a4paper, top=25mm, left=25mm, right=25mm, bottom=25mm}
+      \\usepackage{amsmath, amssymb, geometry, fancyhdr, enumitem, graphicx}
+      \\geometry{top=25mm, left=25mm, right=25mm, bottom=25mm}
       \\pagestyle{fancy}
       \\lhead{\\textbf{efectoTEC}}
-      \\rhead{Fach: ${escapeLatex(schulaufgabe.fach)}}
+      \\rhead{${escapeLatex(schulaufgabe.fach)} | Kl. ${escapeLatex(schulaufgabe.klasse)}}
       
       \\begin{document}
       \\section*{${escapeLatex(schulaufgabe.titel)}}
+      \\textbf{Zeit:} ${schulaufgabe.zeit} \\hfill \\textbf{Hilfsmittel:} ${escapeLatex(schulaufgabe.hilfsmittel)}
+      \\hrule \\vspace{0.5cm}
       
       ${schulaufgabe.aufgaben.map((a, i) => `
         \\subsection*{Aufgabe ${i+1} (${a.be} BE)}
         ${a.text}
       `).join('')}
-      
+
+      \\newpage
+      \\section*{Lösungen}
+      ${escapeLatex(schulaufgabe.loesung)}
       \\end{document}
     `;
 
-    // D) Speichern in /tmp (WICHTIG für Cloud Run)
     const baseName = `schulaufgabe_${Date.now()}`;
     texFilename = path.join(tempDir, `${baseName}.tex`);
     fs.writeFileSync(texFilename, texContent);
 
-    // E) PDF Generierung
-    console.log("-> Starte pdflatex...");
-    // Wir sagen pdflatex explizit: Schreibe den Output nach tempDir!
     const cmd = `pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texFilename}"`;
-
-    exec(cmd, (error, stdout, stderr) => {
-      if (error) {
-        console.error("Fehler beim PDF-Druck:", stdout.slice(-500)); // Letzte 500 Zeichen Log
-        return res.status(500).send("Fehler beim PDF-Erstellen. Logs prüfen.");
-      }
-      
+    exec(cmd, (error) => {
+      if (error) return res.status(500).send("LaTeX Fehler.");
       pdfFilename = path.join(tempDir, `${baseName}.pdf`);
-      console.log("-> PDF fertig: " + pdfFilename);
-      
-      res.download(pdfFilename, 'Dein_Schulaufgabe.pdf', (err) => {
-        // Aufräumen (Clean-Up Routine)
+      res.download(pdfFilename, 'Schulaufgabe.pdf', () => {
+        // Cleanup
         try {
-            if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
-            if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
-            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-            // Auch Hilfsdateien löschen (.log, .aux)
-            const logFile = path.join(tempDir, `${baseName}.log`);
-            const auxFile = path.join(tempDir, `${baseName}.aux`);
-            if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
-            if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
-        } catch (cleanupErr) {
-            console.error("Cleanup Error:", cleanupErr);
-        }
+             req.files.forEach(f => fs.unlinkSync(f.path));
+             fs.unlinkSync(texFilename);
+             fs.unlinkSync(pdfFilename);
+             const log = path.join(tempDir, `${baseName}.log`);
+             if (fs.existsSync(log)) fs.unlinkSync(log);
+        } catch(e) {}
       });
     });
 
   } catch (err) {
-    console.error("CRITICAL ERROR:", err);
-    res.status(500).send("Server Fehler: " + err.message);
+    res.status(500).send(err.message);
   }
 });
 
-app.listen(port, () => {
-  console.log(`\n=========================================`);
-  console.log(`   efectoTEC SERVER LÄUFT (Port ${port})`);
-  console.log(`=========================================\n`);
-});
+app.use(express.static('public')); // Für CSS/JS falls nötig
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.listen(port, () => console.log(`Server läuft auf ${port}`));
