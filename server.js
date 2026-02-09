@@ -12,11 +12,8 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 8080;
 
-// Security & Setup
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 app.use(cors());
-
-// Assets Route
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const tempDir = os.tmpdir();
@@ -43,12 +40,8 @@ function calculateNotenschluessel(total) {
     };
 }
 
-// ROUTE: Startseite
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-// ROUTE: Analyse
 app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     try {
         if (!req.files) return res.json({});
@@ -56,28 +49,22 @@ app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
         const imageParts = req.files.map(f => ({
             inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
         }));
-
         const result = await model.generateContent([
-            `Analysiere den Inhalt. Gib Fach (z.B. Mathematik, Deutsch), Klasse (nur Zahl) und Thema zurück.
-             JSON Format: { "fach": "...", "klasse": "...", "thema": "..." }`,
+            `Analysiere Inhalt. Antworte JSON: { "fach": "...", "klasse": "...", "thema": "..." }`,
             ...imageParts
         ]);
-        
         req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
         res.json(JSON.parse(result.response.text().replace(/```json|```/g, '').trim()));
     } catch (err) {
-        console.error(err);
-        res.json({});
+        res.status(429).json({error: "Zu viele Anfragen"});
     }
 });
 
-// ROUTE: Generierung (v1.4 Layout Update)
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     const runId = Date.now();
     try {
         const { userFach, userKlasse, userThema, examType } = req.body;
         const isEx = examType === 'ex';
-        
         let imageParts = [];
         if (req.files) {
             imageParts = req.files.map(f => ({
@@ -86,25 +73,21 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         }
 
         const systemPrompt = isEx 
-            ? `Erstelle eine Stegreifaufgabe (Ex). Zeit: 20 Min. Umfang: 3 Aufgaben (ca. 20 BE). Fokus: Reproduktion (AFB I-II).`
-            : `Erstelle eine Schulaufgabe. Zeit: 60 Min. Umfang: 5-6 Aufgaben (ca. 45-60 BE). Steigende Schwierigkeit (AFB I-III).`;
+            ? `Erstelle Ex (20 Min). 3 Aufgaben. AFB I-II. JSON Output.`
+            : `Erstelle Schulaufgabe (60 Min). 5 Aufgaben. AFB I-III. JSON Output.`;
 
         const prompt = `
             ${systemPrompt}
             Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
             Regeln:
-            1. Nutze bayerische Operatoren.
-            2. Mache Absätze im Text für bessere Lesbarkeit.
-            3. Lückentext-Platzhalter: {{LUECKE}}.
-            4. Mathe LaTeX in $...$.
+            1. LaTeX für Mathe ($...$).
+            2. Keine Markdown-Formatierung im JSON.
             
-            JSON Output:
+            JSON Structure:
             {
                 "titel": "${userThema}",
-                "hilfsmittel": "${isEx ? 'Keine' : 'Nach Vorgabe'}",
-                "aufgaben": [
-                    { "text": "Aufgabentext...", "afb": "AFB I", "be": 5 }
-                ]
+                "hilfsmittel": "${isEx ? 'Keine' : 'WTR, Formelsammlung'}",
+                "aufgaben": [ { "text": "...", "afb": "AFB I", "be": 5 } ]
             }
         `;
 
@@ -114,33 +97,37 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
 
         if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
 
-        // --- LATEX CONSTRUCTION ---
-        const logoPath = "/app/assets/logo.png"; 
+        // --- LATEX LOGIK (FULL WIDTH FIX) ---
+        const logoPath = "/app/assets/logo.png";
         
-        // Tabellen-Daten vorbereiten
         let totalBE = 0;
-        let taskCells = "";
-        let maxBECells = "";
-        let gradeCells = "";
+        let taskHeaders = "";
+        let maxBERow = "";
+        let emptyRow = "";
         
+        // Dynamische Spalten für TabularX (Aufgaben)
+        // X = Automatische Breite
         data.aufgaben.forEach((t, i) => {
             totalBE += t.be;
-            taskCells += `${i+1} & `;
-            maxBECells += `${t.be} & `;
-            gradeCells += ` & `;
+            taskHeaders += ` ${i+1} &`; // Spaltenkopf 1, 2, 3...
+            maxBERow += ` ${t.be} &`;   // Max BE Zeile
+            emptyRow += ` &`;           // Leere Zeile für Lehrer
         });
+        
+        // Definition: Label (l) | X | X | ... | X | Gesamt (c)
+        // Anzahl X Spalten = Anzahl Aufgaben
+        const taskColDef = "|l|" + "X|".repeat(data.aufgaben.length) + "c|";
+        const gradeColDef = "|l|X|X|X|X|X|X|"; // 6 Noten, gleich breit
 
         const notenSchluessel = calculateNotenschluessel(totalBE);
-        const colDef = "|" + "c|".repeat(data.aufgaben.length) + "c|";
 
-        // Aufgaben zusammenbauen (Mehr Abstand!)
         let taskLatex = "";
         data.aufgaben.forEach((t, i) => {
             let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
             taskLatex += `
                 \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
                 ${content} \\hfill \\textbf{/ ${t.be}~BE}
-                \\vspace{1cm}  % Viel mehr Platz zwischen Aufgaben
+                \\vspace{1cm}
             `;
         });
 
@@ -150,15 +137,18 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         \\usepackage[ngerman]{babel}
         \\usepackage[T1]{fontenc}
         \\usepackage{lmodern}
-        \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, xcolor, array}
+        \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, array}
         
-        % LAYOUT FIX: Top Margin erhöht auf 4.5cm, damit Header nicht in Text ragt
-        \\geometry{top=4.5cm, left=2.5cm, right=2.5cm, bottom=2.5cm, headheight=3cm, footskip=1cm}
-        \\linespread{1.25} % Luftigerer Zeilenabstand für bessere Lesbarkeit
+        % LAYOUT FIX: Top 5cm für Header reserviert
+        \\geometry{top=5cm, left=2.5cm, right=2.5cm, bottom=2.5cm, headheight=3.5cm, footskip=1cm}
+        \\linespread{1.25}
         
         \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
+        % Zentrierte Spalten in TabularX
+        \\newcolumntype{Y}{>{\\centering\\arraybackslash}X}
+        \\renewcommand{\\tabularxcolumn}[1]{>{\\centering\\arraybackslash}m{#1}}
 
-        % HEADER (Symmetrisch)
+        % HEADER
         \\pagestyle{fancy}
         \\fancyhf{}
         \\renewcommand{\\headrulewidth}{0pt}
@@ -172,12 +162,7 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
                 Hilfsmittel: ${escapeLatex(data.hilfsmittel)} &
             \\end{tabular}
         }
-
-        % FOOTER (Nur noch Seitenzahl und Slogan)
-        \\cfoot{
-            \\small Seite \\thepage \\ von \\pageref{LastPage}
-            \\hfill \\textit{Viel Erfolg wünscht Dir efectoTEC!}
-        }
+        \\cfoot{\\thepage}
 
         \\begin{document}
             \\begin{center}
@@ -188,30 +173,36 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
 
             ${taskLatex}
 
-            % FINALER BEWERTUNGS-BLOCK (Am Ende des Dokuments, nicht auf jeder Seite)
+            % --- BEWERTUNGSTABELLE (FULL WIDTH) ---
             \\vfill
             \\begin{minipage}{\\textwidth}
-                \\centering
-                \\textbf{Bewertung} \\\\[0.2cm]
-                \\begin{tabular}{${colDef}}
+                \\section*{Bewertung}
+                
+                % Tabelle 1: Punkte (Breit)
+                \\renewcommand{\\arraystretch}{1.5}
+                \\begin{tabularx}{\\textwidth}{${taskColDef}}
                     \\hline
-                    Aufg. & ${taskCells} Ges. \\\\
+                    \\textbf{Aufgabe} &${taskHeaders} \\textbf{Gesamt} \\\\
                     \\hline
-                    Max. & ${maxBECells} ${totalBE} \\\\
+                    Max. BE &${maxBERow} \\textbf{${totalBE}} \\\\
                     \\hline
-                    Ist & ${gradeCells} \\\\
+                    Erreicht &${emptyRow}  \\\\
                     \\hline
-                \\end{tabular}
-                \\\\[0.5cm]
-                \\begin{tabular}{|l|c|c|c|c|c|c|}
+                \\end{tabularx}
+                
+                \\vspace{0.5cm}
+                
+                % Tabelle 2: Noten (Breit)
+                \\begin{tabularx}{\\textwidth}{${gradeColDef}}
                     \\hline
-                    Note & 1 & 2 & 3 & 4 & 5 & 6 \\\\
+                    \\textbf{Note} & 1 & 2 & 3 & 4 & 5 & 6 \\\\
                     \\hline
-                    Pkte & ${notenSchluessel[1]} & ${notenSchluessel[2]} & ${notenSchluessel[3]} & ${notenSchluessel[4]} & ${notenSchluessel[5]} & ${notenSchluessel[6]} \\\\
+                    Punkte & ${notenSchluessel[1]} & ${notenSchluessel[2]} & ${notenSchluessel[3]} & ${notenSchluessel[4]} & ${notenSchluessel[5]} & ${notenSchluessel[6]} \\\\
                     \\hline
-                \\end{tabular}
-                \\\\[0.8cm]
-                \\Large Note: \\luecke{3cm}
+                \\end{tabularx}
+                
+                \\vspace{1cm}
+                \\Large \\textbf{Note:} \\luecke{3cm} \\hfill \\small \\textit{Viel Erfolg wünscht Dir efectoTEC!}
             \\end{minipage}
 
         \\end{document}
@@ -224,19 +215,19 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
             const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
             if (fs.existsSync(pdfPath)) {
                 res.download(pdfPath, `efectoTEC_${userFach}.pdf`, () => {
-                    [".tex", ".pdf", ".log", ".aux"].forEach(ext => {
-                        try { fs.unlinkSync(path.join(tempDir, `task_${runId}${ext}`)) } catch(e){}
-                    });
+                   // Cleanup Logik
+                   try { 
+                       [".tex", ".pdf", ".log", ".aux"].forEach(ext => fs.unlinkSync(path.join(tempDir, `task_${runId}${ext}`)));
+                   } catch(e){}
                 });
             } else {
-                res.status(500).send("PDF Error.");
+                res.status(500).send("PDF Fehler");
             }
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).send("Fehler: " + err.message);
+        res.status(500).send("Server Fehler: " + err.message);
     }
 });
 
-app.listen(port, () => console.log(`v1.4 Ready on ${port}`));
+app.listen(port, () => console.log(`v1.5 Stable on ${port}`));

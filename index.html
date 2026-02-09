@@ -7,67 +7,68 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-3px); } 100% { transform: translateY(0px); } }
         .robot-float { animation: float 3s ease-in-out infinite; }
+        /* Ultra Compact Mode */
+        body { font-size: 13px; } 
     </style>
 </head>
-<body class="bg-gradient-to-b from-slate-50 to-blue-50 min-h-screen flex items-center justify-center font-sans">
+<body class="bg-gradient-to-b from-slate-50 to-blue-50 min-h-screen flex items-center justify-center font-sans p-2">
 
-    <div class="bg-white p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 relative overflow-hidden">
+    <div class="bg-white p-4 rounded-xl shadow-xl w-full max-w-md border border-slate-200 relative overflow-hidden">
         
-        <div class="text-center mb-8 relative z-10">
-            <p class="text-blue-600 tracking-wider text-sm mb-1">
-                <span class="font-bold">efecto</span><span class="font-extrabold">TEC</span> we ❤️ ROBOTs
+        <div class="text-center mb-3 relative z-10">
+            <p class="text-blue-600 tracking-wider text-[10px] mb-1">
+                <span class="font-bold">efecto</span><span class="font-extrabold text-xs">TEC</span> we ❤️ ROBOTs
             </p>
-            <h1 class="text-3xl font-extrabold text-slate-800">Dein Schulaufgaben-GENERATOR</h1>
+            <h1 class="text-xl font-extrabold text-slate-800">Dein Schulaufgaben-GENERATOR</h1>
             
-            <div class="flex justify-center mt-4">
-                <div class="bg-white rounded-full p-4 shadow-lg border border-slate-100">
-                    <img src="/assets/robot.png" class="h-24 w-auto robot-float" alt="Roboter">
+            <div class="flex justify-center mt-2">
+                <div class="bg-slate-800 rounded-full w-14 h-14 flex items-center justify-center shadow-md border-2 border-white">
+                    <img src="/assets/robot.png" class="h-9 w-auto robot-float" alt="Roboter">
                 </div>
             </div>
         </div>
 
         <div id="step-upload" class="transition-all duration-300">
-            <div class="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:bg-blue-50 transition cursor-pointer group bg-slate-50" onclick="document.getElementById('fileInput').click()">
-                <div class="bg-white w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm group-hover:scale-110 transition">
-                    <i class="fas fa-file-upload text-2xl text-blue-500"></i>
+            <div class="border-2 border-dashed border-blue-300 rounded-lg p-4 text-center hover:bg-blue-50 transition cursor-pointer group bg-slate-50" onclick="document.getElementById('fileInput').click()">
+                <div class="bg-white w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm group-hover:scale-110 transition">
+                    <i class="fas fa-file-upload text-lg text-blue-500"></i>
                 </div>
-                <p class="text-slate-700 font-bold">Hier ablegen</p>
-                <p class="text-xs text-slate-400 mt-1">(Max. 3 Dateien)</p>
+                <p class="text-slate-700 font-bold text-xs">Hier Beispielaufgaben & Hefteinträge ablegen</p>
+                <p class="text-[9px] text-slate-400 mt-0.5">(Max. 3 Dateien)</p>
                 <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="addFiles()">
             </div>
             
-            <div id="preview-grid" class="grid grid-cols-3 gap-3 mt-4 empty:hidden"></div>
+            <div id="preview-grid" class="grid grid-cols-3 gap-2 mt-2 empty:hidden"></div>
             
-            <button onclick="startAnalysis()" id="btn-analyze" class="w-full mt-6 bg-slate-800 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-slate-900 transition hidden flex justify-center items-center gap-2">
+            <button onclick="startAnalysis()" id="btn-analyze" class="w-full mt-3 bg-slate-800 text-white py-2.5 rounded-lg font-bold shadow hover:bg-slate-900 transition hidden flex justify-center items-center gap-2 text-xs">
                 <i class="fas fa-magic"></i> Inhalte prüfen
             </button>
         </div>
 
-        <div id="loading" class="hidden text-center py-12">
-            <div class="relative w-24 h-24 mx-auto mb-6">
+        <div id="loading" class="hidden text-center py-6">
+            <div class="relative w-12 h-12 mx-auto mb-3">
                 <div class="absolute top-0 left-0 w-full h-full border-4 border-blue-100 rounded-full"></div>
                 <div class="absolute top-0 left-0 w-full h-full border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
-                <img src="/assets/robot.png" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-10 h-10 opacity-80">
             </div>
-            <p id="loading-text" class="text-slate-700 font-bold text-lg animate-pulse">Ich entschlüssle deine Sauklaue :)</p>
+            <p id="loading-text" class="text-slate-700 font-bold text-xs animate-pulse">Ich entschlüssle deine Sauklaue :)</p>
         </div>
 
         <div id="step-config" class="hidden">
-            <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-6 flex items-center gap-3">
-                <i class="fas fa-check-circle text-green-600 text-xl"></i>
+            <div class="bg-green-50 border border-green-200 rounded-md p-2 mb-3 flex items-center gap-2">
+                <i class="fas fa-check-circle text-green-600 text-sm"></i>
                 <div>
-                    <p class="text-green-800 text-sm font-bold">Daten erkannt!</p>
+                    <p class="text-green-800 text-[10px] font-bold">Daten erkannt!</p>
                 </div>
             </div>
 
             <form id="generateForm">
-                <div class="space-y-4">
-                    <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <div class="grid grid-cols-2 gap-2">
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Fach</label>
-                            <select id="input-fach" name="userFach" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-700">
+                            <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Fach</label>
+                            <select id="input-fach" name="userFach" class="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-bold text-slate-700">
                                 <option value="Mathematik">Mathematik</option>
                                 <option value="Deutsch">Deutsch</option>
                                 <option value="Englisch">Englisch</option>
@@ -79,8 +80,8 @@
                             </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Klasse (G9)</label>
-                            <select id="input-klasse" name="userKlasse" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-700">
+                            <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Klasse (G9)</label>
+                            <select id="input-klasse" name="userKlasse" class="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-xs font-bold text-slate-700">
                                 <option value="5">5. Klasse</option>
                                 <option value="6">6. Klasse</option>
                                 <option value="7">7. Klasse</option>
@@ -94,23 +95,23 @@
                         </div>
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Thema / Schwerpunkt</label>
-                        <input type="text" id="input-thema" name="userThema" class="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm font-bold">
+                        <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Thema / Schwerpunkt</label>
+                        <input type="text" id="input-thema" name="userThema" class="w-full rounded border border-slate-300 px-2 py-1.5 text-xs font-bold">
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4 mt-8">
-                    <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-700 py-4 rounded-xl font-bold hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center">
-                        <span class="text-lg">📄 Ex erstellen</span>
-                        <span class="text-[10px] uppercase tracking-wide mt-1 text-blue-400">Für 20 Min. Arbeitszeit</span>
+                <div class="grid grid-cols-2 gap-2 mt-4">
+                    <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-700 py-2.5 rounded-lg font-bold hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center">
+                        <span class="text-xs">📄 Ex erstellen</span>
+                        <span class="text-[8px] uppercase tracking-wide text-blue-400">Für 20 Min. Arbeitszeit</span>
                     </button>
-                    <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-4 rounded-xl font-bold hover:bg-slate-800 transition shadow-lg flex flex-col items-center justify-center">
-                        <span class="text-lg">📑 Schulaufgabe</span>
-                        <span class="text-[10px] uppercase tracking-wide mt-1 text-slate-400">Für 60 Min. Arbeitszeit</span>
+                    <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-2.5 rounded-lg font-bold hover:bg-slate-800 transition shadow flex flex-col items-center justify-center">
+                        <span class="text-xs">📑 Schulaufgabe</span>
+                        <span class="text-[8px] uppercase tracking-wide text-slate-400">Für 60 Min. Arbeitszeit</span>
                     </button>
                 </div>
 
-                <button type="button" onclick="location.reload()" class="w-full mt-6 text-slate-400 text-xs hover:text-slate-600 font-medium text-center">
+                <button type="button" onclick="location.reload()" class="w-full mt-3 text-slate-400 text-[9px] hover:text-slate-600 font-medium text-center">
                     Abbrechen & Neustart
                 </button>
             </form>
@@ -162,20 +163,23 @@
                 
                 if(data.fach) document.getElementById('input-fach').value = data.fach;
                 if(data.klasse) document.getElementById('input-klasse').value = data.klasse.replace(/\D/g,'');
-                document.getElementById('input-thema').value = data.thema || "";
+                // THEMA AUTO-FILL FIX
+                if(data.thema) document.getElementById('input-thema').value = data.thema;
 
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step-config').classList.remove('hidden');
             } catch (err) {
-                alert("Konnte die Inhalte nicht lesen. Probier es nochmal.");
-                location.reload();
+                // Bei Google 429 Error warten
+                alert("Google API ist beschäftigt. Bitte 1 Minute warten und erneut klicken.");
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step-upload').classList.remove('hidden');
             }
         }
 
         async function submitGeneration(type) {
             document.getElementById('step-config').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Generiere Prüfung... bitte warten.";
+            document.getElementById('loading-text').innerText = "Schreibe Prüfung... (ca. 20s)";
 
             const formData = new FormData(document.getElementById('generateForm'));
             collectedFiles.forEach(file => formData.append('hefteintrag', file));
@@ -194,10 +198,10 @@
                 a.click();
                 a.remove();
                 
-                document.getElementById('loading-text').innerText = "Fertig! Dein PDF kommt.";
-                setTimeout(() => location.reload(), 4000);
+                document.getElementById('loading-text').innerText = "Fertig! PDF wird geladen.";
+                setTimeout(() => location.reload(), 3000);
             } catch (err) {
-                alert("Fehler: " + err.message);
+                alert("Fehler (evtl. Google Limit): " + err.message);
                 location.reload();
             }
         }
