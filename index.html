@@ -3,107 +3,107 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>efectoTEC Lern-Assistent</title>
+    <title>efectoTEC Generator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .toggle-checkbox:checked {
-            right: 0;
-            border-color: #2563EB;
-        }
-        .toggle-checkbox:checked + .toggle-label {
-            background-color: #2563EB;
-        }
+        @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-10px); } 100% { transform: translateY(0px); } }
+        .robot-float { animation: float 3s ease-in-out infinite; }
     </style>
 </head>
-<body class="bg-gradient-to-br from-slate-50 to-blue-50 min-h-screen flex items-center justify-center font-sans">
+<body class="bg-gradient-to-b from-slate-50 to-blue-50 min-h-screen flex items-center justify-center font-sans">
 
-    <div class="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-lg border border-slate-100">
-        <div class="text-center mb-8">
-            <div class="flex justify-center items-center gap-3 mb-2">
-                <h1 class="text-3xl font-extrabold text-slate-800 tracking-tight">efecto<span class="text-blue-600">TEC</span></h1>
-            </div>
-            <p class="text-slate-500 font-medium">Dein KI-Lern-Assistent (G9)</p>
-            <div class="mt-2 inline-flex items-center px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold">
-                <i class="fas fa-robot mr-2"></i> we ❤️ ROBOTs
+    <div class="bg-white p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 relative overflow-hidden">
+        
+        <div class="text-center mb-8 relative z-10">
+            <p class="text-blue-600 font-bold tracking-wider text-sm uppercase mb-1">efectoTEC we ❤️ ROBOTs</p>
+            <h1 class="text-3xl font-extrabold text-slate-800">Dein Schulaufgaben-GENERATOR</h1>
+            <div class="flex justify-center mt-4">
+                <img src="/assets/robot.png" class="h-28 w-auto robot-float drop-shadow-xl" alt="Roboter">
             </div>
         </div>
 
         <div id="step-upload" class="transition-all duration-300">
-            <div class="border-2 border-dashed border-blue-200 rounded-xl p-8 text-center hover:bg-blue-50 hover:border-blue-400 transition cursor-pointer group" onclick="document.getElementById('fileInput').click()">
-                <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition">
-                    <i class="fas fa-camera text-2xl text-blue-600"></i>
+            <div class="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:bg-blue-50 transition cursor-pointer group bg-slate-50" onclick="document.getElementById('fileInput').click()">
+                <div class="bg-white w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm group-hover:scale-110 transition">
+                    <i class="fas fa-camera text-2xl text-blue-500"></i>
                 </div>
-                <p class="text-slate-700 font-bold mb-1">Hefteintrag abfotografieren</p>
-                <p class="text-xs text-slate-400">oder hier ablegen (Max. 3 Bilder)</p>
+                <p class="text-slate-700 font-bold">Beispielaufgaben / Hefteinträge</p>
+                <p class="text-xs text-slate-400 mt-1">Hier ablegen oder fotografieren</p>
                 <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="addFiles()">
             </div>
             
-            <div id="preview-grid" class="grid grid-cols-3 gap-3 mt-6 empty:hidden"></div>
+            <div id="preview-grid" class="grid grid-cols-3 gap-3 mt-4 empty:hidden"></div>
             
-            <button onclick="startAnalysis()" id="btn-analyze" class="w-full mt-6 bg-slate-900 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition transform hover:-translate-y-1 hidden flex justify-center items-center gap-2">
-                <i class="fas fa-magic"></i> Inhalte analysieren
+            <button onclick="startAnalysis()" id="btn-analyze" class="w-full mt-6 bg-slate-800 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-slate-900 transition hidden flex justify-center items-center gap-2">
+                <i class="fas fa-magic"></i> Inhalte prüfen
             </button>
         </div>
 
         <div id="loading" class="hidden text-center py-12">
-            <div class="relative w-20 h-20 mx-auto mb-6">
-                <div class="absolute top-0 left-0 w-full h-full border-4 border-blue-200 rounded-full opacity-25"></div>
+            <div class="relative w-24 h-24 mx-auto mb-6">
+                <div class="absolute top-0 left-0 w-full h-full border-4 border-blue-100 rounded-full"></div>
                 <div class="absolute top-0 left-0 w-full h-full border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
-                <i class="fas fa-brain absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-blue-600 text-xl"></i>
+                <img src="/assets/robot.png" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-10 h-10 opacity-80">
             </div>
-            <p id="loading-text" class="text-slate-700 font-medium text-lg animate-pulse">KI liest deine Handschrift...</p>
+            <p id="loading-text" class="text-slate-700 font-bold text-lg animate-pulse">Entschlüssle deine Sauklaue :)</p>
         </div>
 
         <div id="step-config" class="hidden">
             <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-6 flex items-center gap-3">
                 <i class="fas fa-check-circle text-green-600 text-xl"></i>
                 <div>
-                    <p class="text-green-800 text-sm font-bold">Analyse erfolgreich!</p>
-                    <p class="text-green-600 text-xs">Bitte Angaben prüfen.</p>
+                    <p class="text-green-800 text-sm font-bold">Daten erkannt!</p>
                 </div>
             </div>
 
-            <form id="generateForm" onsubmit="submitGeneration(event)">
-                
-                <div class="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <label class="block text-xs font-bold text-slate-400 uppercase mb-3 text-center tracking-wider">Art des Leistungsnachweises</label>
-                    <div class="flex justify-center">
-                        <div class="relative inline-block w-64 select-none align-middle transition duration-200 ease-in">
-                            <input type="radio" name="examType" id="type-ex" value="ex" class="peer hidden" checked>
-                            <label for="type-ex" class="absolute left-0 w-1/2 text-center py-2 text-sm font-bold rounded-l-lg cursor-pointer transition-colors peer-checked:bg-blue-600 peer-checked:text-white bg-white text-slate-500 border border-slate-200 hover:bg-slate-100 z-10">
-                                Ex (Kurz)
-                            </label>
-
-                            <input type="radio" name="examType" id="type-sa" value="sa" class="peer hidden">
-                            <label for="type-sa" class="absolute right-0 w-1/2 text-center py-2 text-sm font-bold rounded-r-lg cursor-pointer transition-colors peer-checked:bg-purple-600 peer-checked:text-white bg-white text-slate-500 border border-slate-200 hover:bg-slate-100 z-0 peer-checked:z-10" onclick="document.getElementById('type-sa').checked = true">
-                                Schulaufgabe
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
+            <form id="generateForm">
                 <div class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1">Fach</label>
-                            <input type="text" id="input-fach" name="userFach" class="w-full rounded-lg border-slate-300 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Fach</label>
+                            <select id="input-fach" name="userFach" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-700">
+                                <option value="Mathematik">Mathematik</option>
+                                <option value="Deutsch">Deutsch</option>
+                                <option value="Englisch">Englisch</option>
+                                <option value="Latein">Latein</option>
+                                <option value="Physik">Physik</option>
+                                <option value="Geschichte">Geschichte</option>
+                            </select>
                         </div>
                         <div>
-                            <label class="block text-xs font-bold text-slate-500 mb-1">Klasse</label>
-                            <input type="text" id="input-klasse" name="userKlasse" class="w-full rounded-lg border-slate-300 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700">
+                            <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Klasse (G9)</label>
+                            <select id="input-klasse" name="userKlasse" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-700">
+                                <option value="5">5. Klasse</option>
+                                <option value="6">6. Klasse</option>
+                                <option value="7">7. Klasse</option>
+                                <option value="8">8. Klasse</option>
+                                <option value="9" selected>9. Klasse</option>
+                                <option value="10">10. Klasse</option>
+                                <option value="11">11. Klasse</option>
+                                <option value="12">12. Klasse</option>
+                                <option value="13">13. Klasse</option>
+                            </select>
                         </div>
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-slate-500 mb-1">Thema / Schwerpunkt</label>
-                        <input type="text" id="input-thema" name="userThema" class="w-full rounded-lg border-slate-300 focus:border-blue-500 focus:ring-blue-500 px-3 py-2 text-sm">
+                        <label class="block text-xs font-bold text-slate-500 uppercase mb-1">Thema / Schwerpunkt</label>
+                        <input type="text" id="input-thema" name="userThema" class="w-full rounded-lg border border-slate-300 px-3 py-3 text-sm font-bold">
                     </div>
                 </div>
 
-                <button type="submit" class="w-full mt-8 bg-blue-600 text-white py-4 rounded-xl font-bold shadow-lg hover:bg-blue-700 transition flex justify-center items-center gap-2">
-                    <i class="fas fa-file-pdf"></i> PDF Generieren
-                </button>
-                <button type="button" onclick="location.reload()" class="w-full mt-4 text-slate-400 text-xs hover:text-slate-600 font-medium">
+                <div class="grid grid-cols-2 gap-4 mt-8">
+                    <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-700 py-4 rounded-xl font-bold hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center">
+                        <span class="text-lg">📄 Ex erstellen</span>
+                        <span class="text-[10px] uppercase tracking-wide mt-1 text-blue-400">Für 20 Min. Arbeitszeit</span>
+                    </button>
+                    <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-4 rounded-xl font-bold hover:bg-slate-800 transition shadow-lg flex flex-col items-center justify-center">
+                        <span class="text-lg">📑 Schulaufgabe</span>
+                        <span class="text-[10px] uppercase tracking-wide mt-1 text-slate-400">Für 60 Min. Arbeitszeit</span>
+                    </button>
+                </div>
+
+                <button type="button" onclick="location.reload()" class="w-full mt-6 text-slate-400 text-xs hover:text-slate-600 font-medium text-center">
                     Abbrechen & Neustart
                 </button>
             </form>
@@ -116,8 +116,7 @@
         function addFiles() {
             const input = document.getElementById('fileInput');
             if (input.files.length > 0) {
-                const newFiles = Array.from(input.files);
-                newFiles.forEach(f => {
+                Array.from(input.files).forEach(f => {
                     if (collectedFiles.length < 3) collectedFiles.push(f);
                 });
             }
@@ -138,7 +137,6 @@
                 };
                 reader.readAsDataURL(file);
             });
-            
             const btn = document.getElementById('btn-analyze');
             if (collectedFiles.length > 0) btn.classList.remove('hidden');
             else btn.classList.add('hidden');
@@ -155,30 +153,26 @@
                 const res = await fetch('/analyze', { method: 'POST', body: formData });
                 const data = await res.json();
                 
-                document.getElementById('input-fach').value = data.fach || "Mathematik";
-                document.getElementById('input-klasse').value = (data.klasse || "9").replace(/\D/g,'');
+                if(data.fach) document.getElementById('input-fach').value = data.fach;
+                if(data.klasse) document.getElementById('input-klasse').value = data.klasse.replace(/\D/g,'');
                 document.getElementById('input-thema').value = data.thema || "";
 
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step-config').classList.remove('hidden');
             } catch (err) {
-                alert("Fehler bei der Analyse. Bitte nochmal versuchen.");
+                alert("Konnte die Inhalte nicht lesen. Probier es nochmal.");
                 location.reload();
             }
         }
 
-        async function submitGeneration(e) {
-            e.preventDefault();
+        async function submitGeneration(type) {
             document.getElementById('step-config').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Erstelle PDF (ca. 20s)...";
+            document.getElementById('loading-text').innerText = "Generiere Prüfung... bitte warten.";
 
             const formData = new FormData(document.getElementById('generateForm'));
             collectedFiles.forEach(file => formData.append('hefteintrag', file));
-            
-            // Toggle Wert holen
-            const isEx = document.getElementById('type-ex').checked;
-            formData.append('examType', isEx ? 'ex' : 'sa');
+            formData.append('examType', type);
 
             try {
                 const res = await fetch('/generate', { method: 'POST', body: formData });
@@ -188,13 +182,13 @@
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `efectoTEC_${document.getElementById('input-fach').value}.pdf`;
+                a.download = `efectoTEC_${type.toUpperCase()}.pdf`;
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
                 
-                document.getElementById('loading-text').innerText = "Fertig! Download startet.";
-                setTimeout(() => location.reload(), 3000);
+                document.getElementById('loading-text').innerText = "Fertig! Dein PDF kommt.";
+                setTimeout(() => location.reload(), 4000);
             } catch (err) {
                 alert("Fehler: " + err.message);
                 location.reload();

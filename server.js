@@ -12,258 +12,226 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 8080;
 
-// 1. SECURITY & SETUP
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 Minuten
-    max: 100, // Limit pro IP
-    message: "Zu viele Anfragen. Bitte warten."
-});
-app.use(limiter);
+// Security & Setup
+app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 app.use(cors());
-app.use(express.static('public')); // Für statische Files falls nötig
+app.use(express.static('public')); 
 
-// Temp-Verzeichnis für Cloud Run (Im Speicher)
 const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-const upload = multer({ 
-    dest: uploadDir,
-    limits: { fileSize: 10 * 1024 * 1024 } // 10MB Limit
-});
-
-// KI Setup
+const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 } });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Hilfsfunktion: LaTeX Escaping
 function escapeLatex(text) {
     if (typeof text !== 'string') return text || "";
-    return text
-        .replace(/\\/g, '')
-        .replace(/([&%$#_])/g, '\\$1')
-        .replace(/~/g, '\\textasciitilde ')
-        .replace(/\^/g, '\\textasciicircum ')
-        .replace(/{/g, '\\{')
-        .replace(/}/g, '\\}');
+    return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/{/g, '\\{').replace(/}/g, '\\}');
 }
 
-// ROUTEN
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
+// Hilfsfunktion: Notenschlüssel berechnen (Bayern Standard G9 Annäherung)
+function calculateNotenschluessel(total) {
+    // Einfache Prozentformel: Note 4 ab ca. 50%
+    const p = (pct) => Math.round(total * pct);
+    return {
+        1: `${total} - ${p(0.85)}`,
+        2: `${p(0.85)-1} - ${p(0.70)}`,
+        3: `${p(0.70)-1} - ${p(0.55)}`,
+        4: `${p(0.55)-1} - ${p(0.40)}`,
+        5: `${p(0.40)-1} - ${p(0.20)}`,
+        6: `${p(0.20)-1} - 0`
+    };
+}
 
-// STUFE 1: ANALYSE
+// 1. ANALYSE
 app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     try {
-        if (!req.files || req.files.length === 0) return res.status(400).json({error: "Kein Bild"});
-
+        if (!req.files) return res.json({});
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        const imageParts = req.files.map(file => ({
-            inlineData: { 
-                data: fs.readFileSync(file.path).toString("base64"), 
-                mimeType: "image/jpeg" 
-            }
+        const imageParts = req.files.map(f => ({
+            inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
         }));
 
-        const prompt = `Analysiere diese Hefteinträge. Identifiziere Fach, Klasse (nur Zahl) und das konkrete Thema. 
-        Antworte NUR als JSON: { "fach": "...", "klasse": "...", "thema": "..." }`;
-
-        const result = await model.generateContent([prompt, ...imageParts]);
-        const text = result.response.text();
-        const jsonStr = text.replace(/```json|```/g, '').trim();
-        const analysis = JSON.parse(jsonStr);
-
-        // Cleanup Uploads sofort
+        const result = await model.generateContent([
+            `Analysiere den Inhalt. Gib Fach (z.B. Mathematik, Deutsch), Klasse (nur Zahl) und Thema zurück.
+             JSON Format: { "fach": "...", "klasse": "...", "thema": "..." }`,
+            ...imageParts
+        ]);
+        
         req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
-
-        res.json(analysis);
+        res.json(JSON.parse(result.response.text().replace(/```json|```/g, '').trim()));
     } catch (err) {
-        console.error("Analyse Fehler:", err);
-        res.status(500).json({ error: "Analyse fehlgeschlagen" });
+        console.error(err);
+        res.json({});
     }
 });
 
-// STUFE 2: GENERIERUNG (Das Herzstück)
+// 2. GENERIERUNG
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     const runId = Date.now();
-    const texPath = path.join(tempDir, `task_${runId}.tex`);
-    const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
-
     try {
         const { userFach, userKlasse, userThema, examType } = req.body;
+        const isEx = examType === 'ex';
         
-        // Bilder verarbeiten (falls im 2. Schritt erneut hochgeladen oder gepuffert)
         let imageParts = [];
-        if (req.files && req.files.length > 0) {
-            imageParts = req.files.map(file => ({
-                inlineData: { 
-                    data: fs.readFileSync(file.path).toString("base64"), 
-                    mimeType: "image/jpeg" 
-                }
+        if (req.files) {
+            imageParts = req.files.map(f => ({
+                inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
             }));
         }
 
-        // PROMPT LOGIK (Meilenstein 2: Ex vs. SA)
-        let systemPrompt = "";
-        if (examType === "ex") {
-            systemPrompt = `Du bist ein bayerischer Lehrer. Erstelle eine Stegreifaufgabe (Ex).
-            Zeit: 20 Min. Fokus: Nur Inhalte der Bilder/Thema.
-            Operatoren: Nennen, Skizzieren, Einfaches Erläutern (AFB I & II).
-            Umfang: 3 kurze Aufgaben. Gesamtpunkte: ca. 20 BE.`;
-        } else {
-            systemPrompt = `Du bist ein bayerischer Lehrer. Erstelle eine Schulaufgabe (Großer Leistungsnachweis).
-            Zeit: 60 Min. Fokus: Thema vertiefen + Transferaufgaben (G9 Lehrplan).
-            Operatoren: Analysieren, Begründen, Beurteilen (AFB I, II, III).
-            Umfang: 4-5 Aufgaben, steigende Komplexität. Gesamtpunkte: ca. 40-50 BE.`;
-        }
+        // Prompt Logik
+        const systemPrompt = isEx 
+            ? `Erstelle eine Stegreifaufgabe (Ex). Zeit: 20 Min. Umfang: 3 Aufgaben. Fokus: Reproduktion (AFB I-II).`
+            : `Erstelle eine Schulaufgabe. Zeit: 60 Min. Umfang: 5-6 Aufgaben. Steigende Schwierigkeit (AFB I-III).`;
 
         const prompt = `
             ${systemPrompt}
             Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
-            Erstelle validen JSON Output für folgende Struktur:
+            Regeln:
+            1. Nutze bayerische Operatoren.
+            2. Lückentext-Platzhalter: {{LUECKE}}.
+            3. Mathe LaTeX in $...$.
+            
+            JSON Output:
             {
                 "titel": "${userThema}",
+                "hilfsmittel": "${isEx ? 'Keine' : 'Nach Vorgabe'}",
                 "aufgaben": [
-                    { "titel": "Aufgabentitel", "afb": "AFB I", "text": "LaTeX Code der Frage", "be": 5 },
-                    ...
+                    { "text": "Aufgabentext...", "afb": "AFB I", "be": 5 }
                 ]
             }
-            WICHTIG: Nutze für Mathe LaTeX Umgebungen ($...$). Keine Markdown-Formatierung im JSON.
         `;
 
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash",
-            generationConfig: { responseMimeType: "application/json" }
-        });
-
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const result = await model.generateContent([prompt, ...imageParts]);
         const data = JSON.parse(result.response.text());
 
-        // Cleanup Uploads
+        // Cleanup
         if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
 
-        // LATEX TEMPLATE ENGINE (Meilenstein 1: Dein PDF Design)
-        // Wir nutzen absolute Pfade für Docker (/app/assets/...)
+        // LATEX LOGIK
         const logoPath = "/app/assets/logo.png"; 
-        const robotPath = "/app/assets/robot.png";
-
-        // Berechnung der Gesamtpunkte für die Tabelle
-        let totalBE = 0;
-        let taskRows = "";
-        let beRow = "";
         
-        data.aufgaben.forEach((task, index) => {
-            totalBE += task.be;
-            // Body Content
-            taskRows += `
-                \\section*{Aufgabe ${index + 1} (${escapeLatex(task.afb)})}
-                ${task.text} \\hfill \\textbf{/ ${task.be} BE}
-                \\vspace{1cm}
-            `;
-            // Footer Table Logic (dynamisch bis zu 6 Aufgaben, dann Umbruch)
-            beRow += `${index + 1} & `;
+        // Tabellen & Notenberechnung
+        let totalBE = 0;
+        let taskCells = "";
+        let maxBECells = "";
+        let gradeCells = ""; // Leere Zellen für "Erreicht"
+        
+        data.aufgaben.forEach((t, i) => {
+            totalBE += t.be;
+            taskCells += `${i+1} & `;
+            maxBECells += `${t.be} & `; // Hier kommen die echten Punkte der Aufgabe rein!
+            gradeCells += ` & `;
         });
 
-        // BE Tabelle Aufbauen
-        let beTableConfig = "|"; 
-        for(let i=0; i<data.aufgaben.length; i++) beTableConfig += "c|";
-        beTableConfig += "c|"; // Für Gesamt
+        const notenSchluessel = calculateNotenschluessel(totalBE);
+        const colDef = "|" + "c|".repeat(data.aufgaben.length) + "c|";
 
-        let beValues = "";
-        for(let i=0; i<data.aufgaben.length; i++) beValues += `${data.aufgaben[i].be} & `;
-        
-        const latexContent = `
+        let taskLatex = "";
+        data.aufgaben.forEach((t, i) => {
+            let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
+            // FIX: Tilde ~ verhindert Umbruch bei "/ 5 BE"
+            taskLatex += `
+                \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
+                ${content} \\hfill \\textbf{/ ${t.be}~BE}
+                \\vspace{0.5cm}
+            `;
+        });
+
+        const texContent = `
         \\documentclass[a4paper,11pt]{article}
         \\usepackage[utf8]{inputenc}
         \\usepackage[ngerman]{babel}
         \\usepackage[T1]{fontenc}
-        \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, xcolor}
+        \\usepackage{lmodern}
+        \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, xcolor, array}
         
-        % Layout wie in deiner Vorlage
-        \\geometry{top=3cm, left=2.5cm, right=2.5cm, bottom=3cm, headheight=50pt}
-        
-        % Header Definition
+        \\geometry{top=2.5cm, left=2.5cm, right=2.5cm, bottom=2cm, headheight=2.5cm, footskip=1cm}
+        \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
+
+        % Header
         \\pagestyle{fancy}
         \\fancyhf{}
-        \\lhead{\\includegraphics[height=1.2cm]{${logoPath}}} 
+        \\renewcommand{\\headrulewidth}{0pt}
+        \\lhead{\\includegraphics[width=3.5cm]{${logoPath}}}
         \\rhead{
-            \\begin{tabular}{r l}
+            \\small
+            \\begin{tabular}{ll}
                 \\textbf{Schuljahr 2026} & \\\\
-                Name: & \\rule{4cm}{0.4pt} \\\\
-                Klasse: ${escapeLatex(userKlasse)} & Datum: \\rule{2.5cm}{0.4pt}
+                Name: \\luecke{4cm} & Klasse: ${escapeLatex(userKlasse)} \\\\
+                Zeit: ${isEx ? '20 Min.' : '60 Min.'} & Datum: \\luecke{2.5cm} \\\\
+                Hilfsmittel: ${escapeLatex(data.hilfsmittel)} &
             \\end{tabular}
         }
-        
-        % Footer Definition (Notenschlüssel & Branding)
+
+        % Footer
         \\cfoot{
             \\small
-            \\textbf{Bewertung:} \\\\[0.2cm]
-            \\begin{tabular}{${beTableConfig}}
-                \\hline
-                Aufgabe & ${beRow} Gesamt \\\\
-                \\hline
-                Max. BE & ${beValues} ${totalBE} \\\\
-                \\hline
-                Erreicht & ${"& ".repeat(data.aufgaben.length)} \\\\
-                \\hline
-            \\end{tabular}
-            \\\\[0.5cm]
-            \\begin{tabular}{|l|c|c|c|c|c|c|}
-                \\hline
-                Note & 1 & 2 & 3 & 4 & 5 & 6 \\\\
-                \\hline
-                Punkte & \\hspace{0.5cm} & \\hspace{0.5cm} & \\hspace{0.5cm} & \\hspace{0.5cm} & \\hspace{0.5cm} & \\hspace{0.5cm} \\\\
-                \\hline
-            \\end{tabular}
-            \\\\[0.5cm]
-            \\begin{minipage}{0.7\\textwidth}
-                \\tiny Unterschrift Lehrkraft: \\hrulefill \\\\
-                Kenntnisnahme Eltern: \\hrulefill
-            \\end{minipage}
-            \\hfill
-            \\includegraphics[height=1.5cm]{${robotPath}}
-            \\begin{minipage}{0.2\\textwidth}
-                \\textbf{\\textcolor{blue}{we ❤️ ROBOTs}}
+            \\begin{minipage}{\\textwidth}
+                \\centering
+                \\textbf{Bewertung} \\\\[0.2cm]
+                
+                % Tabelle 1: Aufgaben Punkte
+                \\begin{tabular}{${colDef}}
+                    \\hline
+                    Aufg. & ${taskCells} Ges. \\\\
+                    \\hline
+                    Max. & ${maxBECells} ${totalBE} \\\\
+                    \\hline
+                    Ist & ${gradeCells} \\\\
+                    \\hline
+                \\end{tabular}
+                \\\\[0.5cm]
+                
+                % Tabelle 2: Notenschlüssel (Automatisch berechnet)
+                \\begin{tabular}{|l|c|c|c|c|c|c|}
+                    \\hline
+                    Note & 1 & 2 & 3 & 4 & 5 & 6 \\\\
+                    \\hline
+                    Pkte & ${notenSchluessel[1]} & ${notenSchluessel[2]} & ${notenSchluessel[3]} & ${notenSchluessel[4]} & ${notenSchluessel[5]} & ${notenSchluessel[6]} \\\\
+                    \\hline
+                \\end{tabular}
+                \\\\[0.8cm]
+                
+                % Abschlusszeile
+                \\begin{tabular}{p{5cm} p{8cm}}
+                    \\large Note: \\luecke{2cm} & \\hfill \\textit{Viel Erfolg wünscht Dir efectoTEC!}
+                \\end{tabular}
             \\end{minipage}
         }
 
         \\begin{document}
             \\begin{center}
-                \\Large \\textbf{${examType === 'ex' ? 'Stegreifaufgabe' : 'Schulaufgabe'} im Fach ${escapeLatex(userFach)}} \\\\
+                \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'} im Fach ${escapeLatex(userFach)}} \\\\
                 \\large Thema: ${escapeLatex(data.titel)}
             \\end{center}
             \\vspace{0.5cm}
-            
-            ${taskRows}
-
-            \\vfill
-            \\footnotesize Erstellt mit efectoTEC GNERATOR
+            ${taskLatex}
         \\end{document}
         `;
 
-        fs.writeFileSync(texPath, latexContent);
+        const texPath = path.join(tempDir, `task_${runId}.tex`);
+        fs.writeFileSync(texPath, texContent);
 
-        // PDF Generierung (2x Ausführen für Layout-Berechnung falls nötig, hier reicht oft 1x für basic)
-        exec(`pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texPath}"`, (error, stdout, stderr) => {
+        exec(`pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texPath}"`, (err) => {
+            const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
             if (fs.existsSync(pdfPath)) {
-                res.download(pdfPath, `Schulaufgabe_${userFach}.pdf`, () => {
-                    // Aufräumen
-                    const extensions = ['.tex', '.pdf', '.log', '.aux'];
-                    extensions.forEach(ext => {
-                        const f = path.join(tempDir, `task_${runId}${ext}`);
-                        if (fs.existsSync(f)) fs.unlinkSync(f);
+                res.download(pdfPath, `efectoTEC_${userFach}.pdf`, () => {
+                    [".tex", ".pdf", ".log", ".aux"].forEach(ext => {
+                        try { fs.unlinkSync(path.join(tempDir, `task_${runId}${ext}`)) } catch(e){}
                     });
                 });
             } else {
-                console.error("LaTeX Error Log:", stdout);
-                res.status(500).send("Fehler bei der PDF-Erstellung. Der LaTeX-Code war ungültig.");
+                res.status(500).send("PDF Error.");
             }
         });
 
     } catch (err) {
-        console.error("Generierungs-Fehler:", err);
-        res.status(500).send("Server Fehler: " + err.message);
+        console.error(err);
+        res.status(500).send("Fehler: " + err.message);
     }
 });
 
-app.listen(port, () => console.log(`GNERATOR v1.1 bereit auf Port ${port}`));
+app.listen(port, () => console.log(`v1.3 Ready on ${port}`));
