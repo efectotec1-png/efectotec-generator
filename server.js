@@ -4,95 +4,113 @@ const fs = require('fs');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { exec } = require('child_process');
 const path = require('path');
-const os = require('os'); // Wichtig für Temp-Ordner Zugriff
+const os = require('os'); // ZWINGEND für Cloud Run
 require('dotenv').config();
 
 const app = express();
 
-// --- FEHLER-FIX 1: PORT ---
-// Wir nutzen den Port, den Google uns gibt (meist 8080). 
-// Nur wenn keiner da ist, nehmen wir 3000 (für deinen PC).
+// --- 1. CLOUD RUN CONFIG ---
+// Google Cloud weist dynamisch einen Port zu (meist 8080).
 const port = process.env.PORT || 8080;
 
-// --- FEHLER-FIX 2: SCHREIBRECHTE ---
-// In der Cloud dürfen wir NUR in das temporäre Verzeichnis schreiben.
-// os.tmpdir() findet automatisch den richtigen Ort (z.B. /tmp).
+// WICHTIG: In Cloud Run (Serverless) dürfen wir nur nach /tmp schreiben.
+// Alle anderen Ordner sind Read-Only!
 const tempDir = os.tmpdir(); 
 const uploadDir = path.join(tempDir, 'efectotec_uploads');
 
-// Wir erstellen den Ordner sicher im Temp-Verzeichnis
+// Erstelle den Upload-Ordner im temporären Verzeichnis, falls nicht vorhanden
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer speichert Bilder jetzt im erlaubten Temp-Ordner
+// Multer konfiguieren: Speicherort ist das tempDir
 const upload = multer({ dest: uploadDir });
 
-// --- CONFIG ---
-const MODEL_NAME = process.env.MODEL_NAME || "gemini-2.5-flash";
+// --- 2. KI KONFIGURATION ---
+const MODEL_NAME = "gemini-2.5-flash"; // Das effizienteste Modell
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ 
   model: MODEL_NAME, 
   generationConfig: { responseMimeType: "application/json", temperature: 0.2 } 
 });
 
-// --- HELPER: Sonderzeichen maskieren ---
+// Helper: LaTeX Cleaning für Sicherheit
 function escapeLatex(text) {
   if (typeof text !== 'string') return text;
   return text
     .replace(/\\/g, '') 
-    .replace(/([&%$#_])/g, '\\$1')
+    .replace(/([&%$#_])/g, '\\$1') // Maskiert Sonderzeichen, die LaTeX crashen lassen
     .replace(/~/g, '\\textasciitilde ')
     .replace(/\^/g, '\\textasciicircum ');
 }
 
-// --- ROUTEN ---
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+// --- 3. ROUTEN ---
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
+  // Wir definieren die Pfade hier, damit wir sie im 'finally' Block aufräumen können
   let texFilename = null;
   let pdfFilename = null;
   let imagePath = null;
 
   try {
-    console.log("\n--- NEUE ANFRAGE (CLOUD) ---");
+    console.log("-----------------------------------------");
+    console.log(`NEUE ANFRAGE (Modell: ${MODEL_NAME})`);
     
-    if (!req.file) return res.status(400).send("Fehler: Kein Bild hochgeladen.");
-    
+    if (!req.file) {
+      return res.status(400).send("Fehler: Kein Bild hochgeladen.");
+    }
+
+    // A) Bild einlesen
     imagePath = req.file.path;
     const imageBuffer = fs.readFileSync(imagePath);
-    const imagePart = { inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" } };
+    const imagePart = {
+      inlineData: { data: imageBuffer.toString("base64"), mimeType: "image/jpeg" }
+    };
 
-    console.log("-> Frage KI (2.5 Flash)...");
-    
+    // B) Prompting
     const prompt = `
-      Rolle: Bayerischer Gymnasiallehrer.
-      Aufgabe: Erstelle eine Schulaufgabe (Mathe) aus diesem Bild.
+      Rolle: Bayerischer Gymnasiallehrer (G9).
+      Aufgabe: Erstelle eine Schulaufgabe aus diesem Bild.
       
-      FORMATIERUNG:
-      1. Nutze LaTeX für Formeln ($x^2$).
-      2. WICHTIG: Nutze für Aufzählungen (a, b, c) die LaTeX-Umgebung 'enumerate'.
+      REGELN:
+      1. Ausgabe MUSS valides JSON sein.
+      2. Nutze LaTeX für Formeln (z.B. $x^2$).
+      3. Nutze die 'enumerate'-Umgebung für Teilaufgaben (a, b).
       
-      JSON Output: { "titel": "...", "fach": "...", "aufgaben": [...] }
+      JSON SCHEMA:
+      {
+        "titel": "Thema der Probe",
+        "fach": "Mathematik",
+        "aufgaben": [
+          { "text": "Aufgabentext in LaTeX", "be": 4, "loesung": "Lösungsweg" }
+        ]
+      }
     `;
 
+    console.log("-> Sende an Gemini...");
     const result = await model.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
+    
+    // JSON Cleaning (falls Markdown-Blöcke ```json dabei sind)
     const cleanedText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     const schulaufgabe = JSON.parse(cleanedText);
-
-    console.log(`-> Generiert: ${schulaufgabe.titel}`);
     
-    // LaTeX Datei erstellen
+    console.log("-> Generiert: " + schulaufgabe.titel);
+
+    // C) LaTeX Template bauen
     const texContent = `
       \\documentclass[a4paper,12pt]{article}
       \\usepackage[utf8]{inputenc}
       \\usepackage[ngerman]{babel}
       \\usepackage{amsmath}
       \\usepackage{amssymb}
-      \\usepackage{fancyhdr}
       \\usepackage{geometry}
-      \\usepackage{enumitem}
+      \\usepackage{fancyhdr}
+      \\usepackage{enumitem} 
+      
       \\geometry{a4paper, top=25mm, left=25mm, right=25mm, bottom=25mm}
       \\pagestyle{fancy}
       \\lhead{\\textbf{efectoTEC}}
@@ -108,42 +126,51 @@ app.post('/generate', upload.single('hefteintrag'), async (req, res) => {
       
       \\end{document}
     `;
-    
-    // WICHTIG: Wir schreiben die .tex Datei auch nach /tmp
+
+    // D) Speichern in /tmp (WICHTIG für Cloud Run)
     const baseName = `schulaufgabe_${Date.now()}`;
     texFilename = path.join(tempDir, `${baseName}.tex`);
     fs.writeFileSync(texFilename, texContent);
 
-    console.log("-> Starte PDF-Druck...");
-    
-    // WICHTIG: Wir sagen pdflatex, dass es im /tmp Ordner arbeiten soll (-output-directory)
+    // E) PDF Generierung
+    console.log("-> Starte pdflatex...");
+    // Wir sagen pdflatex explizit: Schreibe den Output nach tempDir!
     const cmd = `pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texFilename}"`;
-    
+
     exec(cmd, (error, stdout, stderr) => {
       if (error) {
-        console.error("PDF FEHLER:", stdout.slice(-200));
-        return res.status(500).send("Fehler beim PDF Druck.");
+        console.error("Fehler beim PDF-Druck:", stdout.slice(-500)); // Letzte 500 Zeichen Log
+        return res.status(500).send("Fehler beim PDF-Erstellen. Logs prüfen.");
       }
       
       pdfFilename = path.join(tempDir, `${baseName}.pdf`);
-      console.log("-> Sende PDF...");
+      console.log("-> PDF fertig: " + pdfFilename);
       
-      res.download(pdfFilename, (err) => {
-         // Aufräumen
-         try {
-             if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
-             if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
-             if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
-         } catch(e) {}
+      res.download(pdfFilename, 'Dein_Schulaufgabe.pdf', (err) => {
+        // Aufräumen (Clean-Up Routine)
+        try {
+            if (fs.existsSync(texFilename)) fs.unlinkSync(texFilename);
+            if (fs.existsSync(pdfFilename)) fs.unlinkSync(pdfFilename);
+            if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
+            // Auch Hilfsdateien löschen (.log, .aux)
+            const logFile = path.join(tempDir, `${baseName}.log`);
+            const auxFile = path.join(tempDir, `${baseName}.aux`);
+            if (fs.existsSync(logFile)) fs.unlinkSync(logFile);
+            if (fs.existsSync(auxFile)) fs.unlinkSync(auxFile);
+        } catch (cleanupErr) {
+            console.error("Cleanup Error:", cleanupErr);
+        }
       });
     });
 
   } catch (err) {
-    console.error("ERROR:", err);
+    console.error("CRITICAL ERROR:", err);
     res.status(500).send("Server Fehler: " + err.message);
   }
 });
 
 app.listen(port, () => {
-  console.log(`efectoTEC Server läuft auf Port ${port}`);
+  console.log(`\n=========================================`);
+  console.log(`   efectoTEC SERVER LÄUFT (Port ${port})`);
+  console.log(`=========================================\n`);
 });

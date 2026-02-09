@@ -1,7 +1,7 @@
 {
-  "name": "efectoTEC-Generator",
+  "name": "efectotec-generator",
   "version": "1.0.0",
-  "description": "Schulaufgaben Generator",
+  "description": "Schulaufgaben Generator für bayerische Gymnasien",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
