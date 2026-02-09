@@ -15,7 +15,9 @@ const port = process.env.PORT || 8080;
 // Security & Setup
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 app.use(cors());
-app.use(express.static('public')); 
+
+// WICHTIG: Damit Assets (Bilder) geladen werden können
+app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'uploads');
@@ -31,7 +33,6 @@ function escapeLatex(text) {
 
 // Hilfsfunktion: Notenschlüssel berechnen (Bayern Standard G9 Annäherung)
 function calculateNotenschluessel(total) {
-    // Einfache Prozentformel: Note 4 ab ca. 50%
     const p = (pct) => Math.round(total * pct);
     return {
         1: `${total} - ${p(0.85)}`,
@@ -43,7 +44,12 @@ function calculateNotenschluessel(total) {
     };
 }
 
-// 1. ANALYSE
+// ROUTE 1: Startseite (DER FIX!)
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// ROUTE 2: Analyse
 app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     try {
         if (!req.files) return res.json({});
@@ -66,7 +72,7 @@ app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     }
 });
 
-// 2. GENERIERUNG
+// ROUTE 3: Generierung
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     const runId = Date.now();
     try {
@@ -80,7 +86,6 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
             }));
         }
 
-        // Prompt Logik
         const systemPrompt = isEx 
             ? `Erstelle eine Stegreifaufgabe (Ex). Zeit: 20 Min. Umfang: 3 Aufgaben. Fokus: Reproduktion (AFB I-II).`
             : `Erstelle eine Schulaufgabe. Zeit: 60 Min. Umfang: 5-6 Aufgaben. Steigende Schwierigkeit (AFB I-III).`;
@@ -107,22 +112,21 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         const result = await model.generateContent([prompt, ...imageParts]);
         const data = JSON.parse(result.response.text());
 
-        // Cleanup
         if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
 
-        // LATEX LOGIK
+        // LATEX BAUEN
+        // Absoluter Pfad im Docker Container
         const logoPath = "/app/assets/logo.png"; 
         
-        // Tabellen & Notenberechnung
         let totalBE = 0;
         let taskCells = "";
         let maxBECells = "";
-        let gradeCells = ""; // Leere Zellen für "Erreicht"
+        let gradeCells = "";
         
         data.aufgaben.forEach((t, i) => {
             totalBE += t.be;
             taskCells += `${i+1} & `;
-            maxBECells += `${t.be} & `; // Hier kommen die echten Punkte der Aufgabe rein!
+            maxBECells += `${t.be} & `;
             gradeCells += ` & `;
         });
 
@@ -132,7 +136,6 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         let taskLatex = "";
         data.aufgaben.forEach((t, i) => {
             let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
-            // FIX: Tilde ~ verhindert Umbruch bei "/ 5 BE"
             taskLatex += `
                 \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
                 ${content} \\hfill \\textbf{/ ${t.be}~BE}
@@ -172,8 +175,6 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
             \\begin{minipage}{\\textwidth}
                 \\centering
                 \\textbf{Bewertung} \\\\[0.2cm]
-                
-                % Tabelle 1: Aufgaben Punkte
                 \\begin{tabular}{${colDef}}
                     \\hline
                     Aufg. & ${taskCells} Ges. \\\\
@@ -184,8 +185,6 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
                     \\hline
                 \\end{tabular}
                 \\\\[0.5cm]
-                
-                % Tabelle 2: Notenschlüssel (Automatisch berechnet)
                 \\begin{tabular}{|l|c|c|c|c|c|c|}
                     \\hline
                     Note & 1 & 2 & 3 & 4 & 5 & 6 \\\\
@@ -194,8 +193,6 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
                     \\hline
                 \\end{tabular}
                 \\\\[0.8cm]
-                
-                % Abschlusszeile
                 \\begin{tabular}{p{5cm} p{8cm}}
                     \\large Note: \\luecke{2cm} & \\hfill \\textit{Viel Erfolg wünscht Dir efectoTEC!}
                 \\end{tabular}
@@ -234,4 +231,4 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`v1.3 Ready on ${port}`));
+app.listen(port, () => console.log(`v1.3.1 Ready on ${port}`));
