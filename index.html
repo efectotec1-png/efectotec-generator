@@ -16,20 +16,25 @@
     <div class="bg-white p-6 md:p-8 rounded-2xl shadow-2xl w-full max-w-xl border border-slate-200 relative overflow-hidden">
         
         <div class="text-center mb-8 relative z-10">
-            <p class="text-blue-600 font-bold tracking-wider text-sm uppercase mb-1">efectoTEC we ❤️ ROBOTs</p>
+            <p class="text-blue-600 tracking-wider text-sm mb-1">
+                <span class="font-bold">efecto</span><span class="font-extrabold">TEC</span> we ❤️ ROBOTs
+            </p>
             <h1 class="text-3xl font-extrabold text-slate-800">Dein Schulaufgaben-GENERATOR</h1>
+            
             <div class="flex justify-center mt-4">
-                <img src="/assets/robot.png" class="h-28 w-auto robot-float drop-shadow-xl" alt="Roboter">
+                <div class="bg-white rounded-full p-4 shadow-lg border border-slate-100">
+                    <img src="/assets/robot.png" class="h-24 w-auto robot-float" alt="Roboter">
+                </div>
             </div>
         </div>
 
         <div id="step-upload" class="transition-all duration-300">
             <div class="border-2 border-dashed border-blue-300 rounded-xl p-6 text-center hover:bg-blue-50 transition cursor-pointer group bg-slate-50" onclick="document.getElementById('fileInput').click()">
                 <div class="bg-white w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm group-hover:scale-110 transition">
-                    <i class="fas fa-camera text-2xl text-blue-500"></i>
+                    <i class="fas fa-file-upload text-2xl text-blue-500"></i>
                 </div>
-                <p class="text-slate-700 font-bold">Beispielaufgaben / Hefteinträge</p>
-                <p class="text-xs text-slate-400 mt-1">Hier ablegen oder fotografieren</p>
+                <p class="text-slate-700 font-bold">Hier ablegen</p>
+                <p class="text-xs text-slate-400 mt-1">(Max. 3 Dateien)</p>
                 <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="addFiles()">
             </div>
             
@@ -46,7 +51,7 @@
                 <div class="absolute top-0 left-0 w-full h-full border-4 border-blue-600 rounded-full border-t-transparent animate-spin"></div>
                 <img src="/assets/robot.png" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-10 h-10 opacity-80">
             </div>
-            <p id="loading-text" class="text-slate-700 font-bold text-lg animate-pulse">Entschlüssle deine Sauklaue :)</p>
+            <p id="loading-text" class="text-slate-700 font-bold text-lg animate-pulse">Ich entschlüssle deine Sauklaue :)</p>
         </div>
 
         <div id="step-config" class="hidden">
@@ -66,9 +71,11 @@
                                 <option value="Mathematik">Mathematik</option>
                                 <option value="Deutsch">Deutsch</option>
                                 <option value="Englisch">Englisch</option>
+                                <option value="Französisch">Französisch</option>
                                 <option value="Latein">Latein</option>
                                 <option value="Physik">Physik</option>
                                 <option value="Geschichte">Geschichte</option>
+                                <option value="Sonstiges">Sonstiges</option>
                             </select>
                         </div>
                         <div>

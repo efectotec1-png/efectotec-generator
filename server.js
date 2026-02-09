@@ -16,7 +16,7 @@ const port = process.env.PORT || 8080;
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 app.use(cors());
 
-// WICHTIG: Damit Assets (Bilder) geladen werden können
+// Assets Route
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const tempDir = os.tmpdir();
@@ -31,7 +31,6 @@ function escapeLatex(text) {
     return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/{/g, '\\{').replace(/}/g, '\\}');
 }
 
-// Hilfsfunktion: Notenschlüssel berechnen (Bayern Standard G9 Annäherung)
 function calculateNotenschluessel(total) {
     const p = (pct) => Math.round(total * pct);
     return {
@@ -44,12 +43,12 @@ function calculateNotenschluessel(total) {
     };
 }
 
-// ROUTE 1: Startseite (DER FIX!)
+// ROUTE: Startseite
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// ROUTE 2: Analyse
+// ROUTE: Analyse
 app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     try {
         if (!req.files) return res.json({});
@@ -72,7 +71,7 @@ app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     }
 });
 
-// ROUTE 3: Generierung
+// ROUTE: Generierung (v1.4 Layout Update)
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     const runId = Date.now();
     try {
@@ -87,16 +86,17 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         }
 
         const systemPrompt = isEx 
-            ? `Erstelle eine Stegreifaufgabe (Ex). Zeit: 20 Min. Umfang: 3 Aufgaben. Fokus: Reproduktion (AFB I-II).`
-            : `Erstelle eine Schulaufgabe. Zeit: 60 Min. Umfang: 5-6 Aufgaben. Steigende Schwierigkeit (AFB I-III).`;
+            ? `Erstelle eine Stegreifaufgabe (Ex). Zeit: 20 Min. Umfang: 3 Aufgaben (ca. 20 BE). Fokus: Reproduktion (AFB I-II).`
+            : `Erstelle eine Schulaufgabe. Zeit: 60 Min. Umfang: 5-6 Aufgaben (ca. 45-60 BE). Steigende Schwierigkeit (AFB I-III).`;
 
         const prompt = `
             ${systemPrompt}
             Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
             Regeln:
             1. Nutze bayerische Operatoren.
-            2. Lückentext-Platzhalter: {{LUECKE}}.
-            3. Mathe LaTeX in $...$.
+            2. Mache Absätze im Text für bessere Lesbarkeit.
+            3. Lückentext-Platzhalter: {{LUECKE}}.
+            4. Mathe LaTeX in $...$.
             
             JSON Output:
             {
@@ -114,10 +114,10 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
 
         if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
 
-        // LATEX BAUEN
-        // Absoluter Pfad im Docker Container
+        // --- LATEX CONSTRUCTION ---
         const logoPath = "/app/assets/logo.png"; 
         
+        // Tabellen-Daten vorbereiten
         let totalBE = 0;
         let taskCells = "";
         let maxBECells = "";
@@ -133,13 +133,14 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         const notenSchluessel = calculateNotenschluessel(totalBE);
         const colDef = "|" + "c|".repeat(data.aufgaben.length) + "c|";
 
+        // Aufgaben zusammenbauen (Mehr Abstand!)
         let taskLatex = "";
         data.aufgaben.forEach((t, i) => {
             let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
             taskLatex += `
                 \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
                 ${content} \\hfill \\textbf{/ ${t.be}~BE}
-                \\vspace{0.5cm}
+                \\vspace{1cm}  % Viel mehr Platz zwischen Aufgaben
             `;
         });
 
@@ -151,14 +152,17 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         \\usepackage{lmodern}
         \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, xcolor, array}
         
-        \\geometry{top=2.5cm, left=2.5cm, right=2.5cm, bottom=2cm, headheight=2.5cm, footskip=1cm}
+        % LAYOUT FIX: Top Margin erhöht auf 4.5cm, damit Header nicht in Text ragt
+        \\geometry{top=4.5cm, left=2.5cm, right=2.5cm, bottom=2.5cm, headheight=3cm, footskip=1cm}
+        \\linespread{1.25} % Luftigerer Zeilenabstand für bessere Lesbarkeit
+        
         \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
 
-        % Header
+        % HEADER (Symmetrisch)
         \\pagestyle{fancy}
         \\fancyhf{}
         \\renewcommand{\\headrulewidth}{0pt}
-        \\lhead{\\includegraphics[width=3.5cm]{${logoPath}}}
+        \\lhead{\\includegraphics[width=4cm]{${logoPath}}}
         \\rhead{
             \\small
             \\begin{tabular}{ll}
@@ -169,9 +173,23 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
             \\end{tabular}
         }
 
-        % Footer
+        % FOOTER (Nur noch Seitenzahl und Slogan)
         \\cfoot{
-            \\small
+            \\small Seite \\thepage \\ von \\pageref{LastPage}
+            \\hfill \\textit{Viel Erfolg wünscht Dir efectoTEC!}
+        }
+
+        \\begin{document}
+            \\begin{center}
+                \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'} im Fach ${escapeLatex(userFach)}} \\\\
+                \\large Thema: ${escapeLatex(data.titel)}
+            \\end{center}
+            \\vspace{0.5cm}
+
+            ${taskLatex}
+
+            % FINALER BEWERTUNGS-BLOCK (Am Ende des Dokuments, nicht auf jeder Seite)
+            \\vfill
             \\begin{minipage}{\\textwidth}
                 \\centering
                 \\textbf{Bewertung} \\\\[0.2cm]
@@ -193,19 +211,9 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
                     \\hline
                 \\end{tabular}
                 \\\\[0.8cm]
-                \\begin{tabular}{p{5cm} p{8cm}}
-                    \\large Note: \\luecke{2cm} & \\hfill \\textit{Viel Erfolg wünscht Dir efectoTEC!}
-                \\end{tabular}
+                \\Large Note: \\luecke{3cm}
             \\end{minipage}
-        }
 
-        \\begin{document}
-            \\begin{center}
-                \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'} im Fach ${escapeLatex(userFach)}} \\\\
-                \\large Thema: ${escapeLatex(data.titel)}
-            \\end{center}
-            \\vspace{0.5cm}
-            ${taskLatex}
         \\end{document}
         `;
 
@@ -231,4 +239,4 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`v1.3.1 Ready on ${port}`));
+app.listen(port, () => console.log(`v1.4 Ready on ${port}`));
