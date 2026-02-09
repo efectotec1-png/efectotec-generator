@@ -16,123 +16,95 @@ if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Multer Config: Erlaubt bis zu 3 Bilder gleichzeitig
 const upload = multer({ dest: uploadDir });
-
-// KI Config
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ 
   model: "gemini-2.5-flash", 
   generationConfig: { responseMimeType: "application/json", temperature: 0.3 } 
 });
 
-// Helper
 function escapeLatex(text) {
-  if (typeof text !== 'string') return text;
-  return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/~/g, '\\textasciitilde ').replace(/\^/g, '\\textasciicircum ');
+  if (typeof text !== 'string') return text || "";
+  return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/~/g, '\\textasciitilde ').replace(/\^/g, '\\textasciicircum ').replace(/{/g, '\\{').replace(/}/g, '\\}');
 }
 
-// --- ROUTE 1: ANALYSE (Der "Magic Pre-Check") ---
+// --- ROUTE 1: ANALYSE ---
 app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
     try {
-        if (!req.files || req.files.length === 0) return res.status(400).json({ error: "Keine Bilder." });
+        if (!req.files || req.files.length === 0) return res.json({}); 
 
-        console.log(`-> Analyse-Request: ${req.files.length} Bilder`);
-
-        // Bilder für Gemini vorbereiten
         const imageParts = req.files.map(file => ({
-            inlineData: {
-                data: fs.readFileSync(file.path).toString("base64"),
-                mimeType: "image/jpeg"
-            }
+            inlineData: { data: fs.readFileSync(file.path).toString("base64"), mimeType: "image/jpeg" }
         }));
 
         const prompt = `
-            Analysiere diese Hefteinträge/Skizzen.
-            Identifiziere:
-            1. Das Schulfach (z.B. Mathematik, Physik).
-            2. Die vermutliche Klasse (Bayerisches Gymnasium G9, z.B. "9").
-            3. Das konkrete Thema (z.B. "Quadratische Funktionen").
-            
+            Analysiere diese Schulmaterialien.
+            Identifiziere Fach, Klasse und Thema.
             Antworte NUR mit JSON:
             { "fach": "...", "klasse": "...", "thema": "..." }
         `;
 
         const result = await model.generateContent([prompt, ...imageParts]);
-        const responseText = result.response.text();
-        const analysis = JSON.parse(responseText.replace(/```json/g, '').replace(/```/g, '').trim());
+        const analysis = JSON.parse(result.response.text().replace(/```json/g, '').replace(/```/g, '').trim());
         
-        console.log("-> Analyse Ergebnis:", analysis);
-        
-        // Cleanup sofort, wir brauchen die Bilder erst beim Generate wieder
-        req.files.forEach(f => fs.unlinkSync(f.path));
-
+        req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
         res.json(analysis);
 
     } catch (err) {
         console.error("Analyse Fehler:", err);
-        res.status(500).json({ error: err.message });
+        res.json({}); 
     }
 });
 
-
-// --- ROUTE 2: GENERIERUNG (Der "Heavy Lifter") ---
+// --- ROUTE 2: GENERIERUNG ---
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
-  let texFilename, pdfFilename;
+  let texFilename;
 
   try {
-    // Wir holen uns die bestätigten Daten vom Frontend
     const { userFach, userKlasse, userThema } = req.body;
-    console.log(`-> Generiere: ${userFach}, Kl. ${userKlasse}, Thema: ${userThema}`);
+    console.log(`Job: ${userFach} Kl.${userKlasse} - ${userThema}`);
 
-    const imageParts = req.files.map(file => ({
-        inlineData: { data: fs.readFileSync(file.path).toString("base64"), mimeType: "image/jpeg" }
-    }));
+    let imageParts = [];
+    if (req.files && req.files.length > 0) {
+        imageParts = req.files.map(file => ({
+            inlineData: { data: fs.readFileSync(file.path).toString("base64"), mimeType: "image/jpeg" }
+        }));
+    }
 
-    // Der präzise Lehrplan-Prompt
     const prompt = `
-      Rolle: Bayerischer Gymnasiallehrer (G9).
-      Aufgabe: Erstelle eine Schulaufgabe für das Fach ${userFach}, Klasse ${userKlasse}.
-      Thema: ${userThema}.
-      Basis: Nutze die hochgeladenen Bilder als Inspiration für Aufgabenstellungen, aber halte dich strikt an den LehrplanPLUS für Klasse ${userKlasse}.
+      Rolle: Bayerischer Lehrer (G9).
+      Erstelle eine Schulaufgabe.
+      Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
       
-      ANFORDERUNGEN:
-      1. Umfang: 60 Minuten (ca. 28-32 BE).
-      2. Niveau: Mix aus AFB I (30%), II (50%), III (20%).
-      3. Format: Valides JSON.
+      VORGABEN:
+      1. LaTeX für Formeln. KEIN Markdown im LaTeX.
+      2. Operatoren nach LehrplanPLUS.
+      3. Strukturierte Ausgabe.
       
       JSON OUTPUT:
       {
-        "titel": "Schulaufgabe: ${userThema}",
-        "fach": "${userFach}",
-        "klasse": "${userKlasse}",
-        "zeit": "60 Min",
-        "hilfsmittel": "Taschenrechner, Merkhilfe",
-        "aufgaben": [
-          { "text": "LaTeX Code hier", "be": 4, "afb": "I" }
-        ],
-        "loesung": "LaTeX Lösungsskizze"
+        "titel": "${userThema}",
+        "aufgaben": [ { "text": "LaTeX Code", "be": 5 } ],
+        "loesung": "Lösungsskizze LaTeX"
       }
     `;
 
     const result = await model.generateContent([prompt, ...imageParts]);
-    const schulaufgabe = JSON.parse(result.response.text().replace(/```json/g, '').replace(/```/g, '').trim());
+    const cleanJson = result.response.text().replace(/```json/g, '').replace(/```/g, '').trim();
+    const schulaufgabe = JSON.parse(cleanJson);
 
-    // LaTeX Template
     const texContent = `
       \\documentclass[a4paper,12pt]{article}
       \\usepackage[utf8]{inputenc}
       \\usepackage[ngerman]{babel}
-      \\usepackage{amsmath, amssymb, geometry, fancyhdr, enumitem, graphicx}
+      \\usepackage{amsmath, amssymb, geometry, fancyhdr, enumitem}
       \\geometry{top=25mm, left=25mm, right=25mm, bottom=25mm}
       \\pagestyle{fancy}
       \\lhead{\\textbf{efectoTEC}}
-      \\rhead{${escapeLatex(schulaufgabe.fach)} | Kl. ${escapeLatex(schulaufgabe.klasse)}}
+      \\rhead{${escapeLatex(userFach)} | Kl. ${escapeLatex(userKlasse)}}
       
       \\begin{document}
       \\section*{${escapeLatex(schulaufgabe.titel)}}
-      \\textbf{Zeit:} ${schulaufgabe.zeit} \\hfill \\textbf{Hilfsmittel:} ${escapeLatex(schulaufgabe.hilfsmittel)}
-      \\hrule \\vspace{0.5cm}
       
       ${schulaufgabe.aufgaben.map((a, i) => `
         \\subsection*{Aufgabe ${i+1} (${a.be} BE)}
@@ -140,7 +112,7 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
       `).join('')}
 
       \\newpage
-      \\section*{Lösungen}
+      \\section*{Lösungen (Lehrkraft)}
       ${escapeLatex(schulaufgabe.loesung)}
       \\end{document}
     `;
@@ -150,26 +122,29 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     fs.writeFileSync(texFilename, texContent);
 
     const cmd = `pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texFilename}"`;
-    exec(cmd, (error) => {
-      if (error) return res.status(500).send("LaTeX Fehler.");
-      pdfFilename = path.join(tempDir, `${baseName}.pdf`);
+    
+    exec(cmd, (error, stdout) => {
+      if (error) {
+        // Log an Frontend senden!
+        return res.status(500).send("LaTeX Fehler:\n" + stdout.slice(-300));
+      }
+      
+      const pdfFilename = path.join(tempDir, `${baseName}.pdf`);
       res.download(pdfFilename, 'Schulaufgabe.pdf', () => {
-        // Cleanup
         try {
-             req.files.forEach(f => fs.unlinkSync(f.path));
-             fs.unlinkSync(texFilename);
-             fs.unlinkSync(pdfFilename);
-             const log = path.join(tempDir, `${baseName}.log`);
-             if (fs.existsSync(log)) fs.unlinkSync(log);
+             if(req.files) req.files.forEach(f => fs.unlinkSync(f.path));
+             const exts = [".tex", ".pdf", ".log", ".aux"];
+             exts.forEach(ext => {
+                 const f = path.join(tempDir, baseName + ext);
+                 if(fs.existsSync(f)) fs.unlinkSync(f);
+             });
         } catch(e) {}
       });
     });
 
   } catch (err) {
-    res.status(500).send(err.message);
+    res.status(500).send("Server Fehler: " + err.message);
   }
 });
 
-app.use(express.static('public')); // Für CSS/JS falls nötig
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.listen(port, () => console.log(`Server läuft auf ${port}`));
+app.listen(port, () => console.log(`Start auf ${port}`));

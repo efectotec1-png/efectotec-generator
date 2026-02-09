@@ -9,61 +9,90 @@
 </head>
 <body class="bg-slate-50 min-h-screen flex items-center justify-center font-sans">
 
-    <div class="bg-white p-8 rounded-xl shadow-xl w-full max-w-md border border-slate-200">
-        <div class="text-center mb-8">
+    <div class="bg-white p-8 rounded-xl shadow-xl w-full max-w-lg border border-slate-200">
+        <div class="text-center mb-6">
             <h1 class="text-3xl font-bold text-blue-600 mb-2">efectoTEC</h1>
-            <p class="text-slate-500">Bayerischer Schulaufgaben-Generator</p>
+            <p class="text-slate-800 font-medium">Bayerischer Schulaufgaben-Generator (G9)</p>
+            <p class="text-slate-500 text-sm mt-2 px-4">
+                Lade deine Lernmaterialien hoch. Die KI erstellt daraus eine lehrplankonforme Probeprüfung zur Vorbereitung.
+            </p>
         </div>
 
         <div id="step-upload">
-            <div class="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center hover:bg-blue-50 transition cursor-pointer" onclick="document.getElementById('fileInput').click()">
+            <div class="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center hover:bg-blue-50 transition cursor-pointer relative" onclick="document.getElementById('fileInput').click()">
                 <i class="fas fa-cloud-upload-alt text-4xl text-blue-400 mb-4"></i>
-                <p class="text-slate-600 font-medium">Hefteinträge hier ablegen</p>
+                <p class="text-slate-600 font-medium">Beispielaufgaben / Hefteinträge hier ablegen</p>
                 <p class="text-xs text-slate-400 mt-2">Max. 3 Bilder (JPG, PNG)</p>
                 <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="handleFiles()">
             </div>
             
-            <div id="preview-grid" class="grid grid-cols-3 gap-2 mt-4"></div>
+            <div id="preview-grid" class="grid grid-cols-3 gap-2 mt-4 empty:hidden"></div>
 
             <button onclick="startAnalysis()" id="btn-analyze" class="w-full mt-6 bg-blue-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-blue-700 transition hidden disabled:opacity-50">
-                <i class="fas fa-magic mr-2"></i> Analysieren
+                Inhalte prüfen
             </button>
         </div>
 
         <div id="loading" class="hidden text-center py-8">
             <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p id="loading-text" class="text-blue-600 font-medium animate-pulse">KI analysiert Lehrplan...</p>
+            <p id="loading-text" class="text-blue-600 font-medium animate-pulse">Verarbeite Inhalte...</p>
         </div>
 
         <div id="step-config" class="hidden">
-            <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                <p class="text-green-700 text-sm"><i class="fas fa-check-circle mr-2"></i>Analyse erfolgreich!</p>
+            <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-6 text-center">
+                <p class="text-green-700 text-sm font-semibold"><i class="fas fa-check-circle mr-2"></i>Inhalte erkannt!</p>
             </div>
 
             <form id="generateForm" onsubmit="submitGeneration(event)">
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-slate-700">Fach</label>
-                        <input type="text" id="input-fach" name="userFach" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 px-4 py-2 border">
+                        <select id="input-fach" name="userFach" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white px-4 py-2 border h-10">
+                            <option value="Mathematik">Mathematik</option>
+                            <option value="Deutsch">Deutsch</option>
+                            <option value="Englisch">Englisch</option>
+                            <option value="Latein">Latein</option>
+                            <option value="Französisch">Französisch</option>
+                            <option value="Spanisch">Spanisch</option>
+                            <option value="Physik">Physik</option>
+                            <option value="Chemie">Chemie</option>
+                            <option value="Geschichte">Geschichte</option>
+                        </select>
                     </div>
+
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-slate-700">Klasse</label>
-                            <input type="text" id="input-klasse" name="userKlasse" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 px-4 py-2 border">
+                            <label class="block text-sm font-medium text-slate-700">Klasse (G9)</label>
+                            <select id="input-klasse" name="userKlasse" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white px-4 py-2 border h-10">
+                                <option value="5">5. Klasse</option>
+                                <option value="6">6. Klasse</option>
+                                <option value="7">7. Klasse</option>
+                                <option value="8">8. Klasse</option>
+                                <option value="9" selected>9. Klasse</option>
+                                <option value="10">10. Klasse</option>
+                                <option value="11">11. Klasse</option>
+                                <option value="12">12. Klasse</option>
+                                <option value="13">13. Klasse</option>
+                            </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-700">Dauer</label>
-                            <input type="text" value="60 Min" disabled class="mt-1 block w-full rounded-md border-slate-300 bg-slate-100 text-slate-500 px-4 py-2 border">
+                            <input type="text" value="60 Min" disabled class="mt-1 block w-full rounded-md border-slate-300 bg-slate-100 text-slate-500 px-4 py-2 border h-10">
                         </div>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700">Thema</label>
-                        <input type="text" id="input-thema" name="userThema" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-slate-50 px-4 py-2 border">
+
+                    <div class="w-full">
+                        <label class="block text-sm font-medium text-slate-700">Thema / Schwerpunkt</label>
+                        <input type="text" id="input-thema" name="userThema" placeholder="z.B. Quadratische Funktionen" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 bg-white px-4 py-2 border h-10">
                     </div>
                 </div>
 
                 <button type="submit" class="w-full mt-8 bg-green-600 text-white py-3 rounded-lg font-bold shadow-lg hover:bg-green-700 transition">
                     <i class="fas fa-file-pdf mr-2"></i> Schulaufgabe erstellen
+                </button>
+                
+                <button type="button" onclick="location.reload()" class="w-full mt-3 text-slate-400 text-sm hover:text-slate-600">
+                    Abbrechen
                 </button>
             </form>
         </div>
@@ -74,70 +103,78 @@
 
         function handleFiles() {
             const input = document.getElementById('fileInput');
-            const files = Array.from(input.files);
-            if (files.length === 0) return;
-
-            selectedFiles = files.slice(0, 3); // Max 3
+            if (input.files.length > 0) {
+                // Konvertiere FileList zu Array und nimm max 3
+                selectedFiles = Array.from(input.files).slice(0, 3);
+            }
+            
             const grid = document.getElementById('preview-grid');
-            grid.innerHTML = '';
+            grid.innerHTML = ''; 
 
             selectedFiles.forEach(file => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const div = document.createElement('div');
-                    div.className = 'aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200';
+                    div.className = 'aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm';
                     div.innerHTML = `<img src="${e.target.result}" class="w-full h-full object-cover">`;
                     grid.appendChild(div);
                 };
                 reader.readAsDataURL(file);
             });
 
-            document.getElementById('btn-analyze').classList.remove('hidden');
+            if (selectedFiles.length > 0) {
+                document.getElementById('btn-analyze').classList.remove('hidden');
+            }
         }
 
         async function startAnalysis() {
-            // UI Switch
             document.getElementById('step-upload').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Analysiere Handschrift & Thema...";
+            document.getElementById('loading-text').innerText = "Verarbeite Inhalte...";
 
             const formData = new FormData();
             selectedFiles.forEach(file => formData.append('hefteintrag', file));
 
             try {
                 const res = await fetch('/analyze', { method: 'POST', body: formData });
-                const data = await res.json();
+                const data = await res.json(); // Wir erwarten immer JSON, auch bei Fehler {}
 
-                // Fülle Formular
-                document.getElementById('input-fach').value = data.fach || "Mathematik";
-                document.getElementById('input-klasse').value = data.klasse || "9";
-                document.getElementById('input-thema').value = data.thema || "Allgemein";
+                // Mapping (Best Effort)
+                if (data.fach) document.getElementById('input-fach').value = data.fach;
+                
+                let klasseNum = (data.klasse || "9").replace(/\D/g, ''); 
+                if(klasseNum) document.getElementById('input-klasse').value = klasseNum;
 
-                // Zeige Formular
+                document.getElementById('input-thema').value = data.thema || "";
+
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step-config').classList.remove('hidden');
 
             } catch (err) {
-                alert("Fehler bei der Analyse: " + err.message);
-                location.reload();
+                console.error(err);
+                // Fallback: Einfach weiter zum Formular, damit der User es manuell ausfüllen kann
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step-config').classList.remove('hidden');
             }
         }
 
         async function submitGeneration(e) {
             e.preventDefault();
             
-            // UI Switch
             document.getElementById('step-config').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Generiere LaTeX PDF (ca. 20s)...";
+            document.getElementById('loading-text').innerText = "Erstelle Schulaufgabe (ca. 20s)...";
 
             const formData = new FormData(document.getElementById('generateForm'));
-            // WICHTIG: Wir senden die Bilder nochmal mit, da der Server stateless ist
             selectedFiles.forEach(file => formData.append('hefteintrag', file));
 
             try {
                 const res = await fetch('/generate', { method: 'POST', body: formData });
-                if (!res.ok) throw new Error("Server Fehler");
+                
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error(errorText); // Hier werfen wir den Server-Fehler (z.B. LaTeX Logs)
+                }
                 
                 const blob = await res.blob();
                 const url = window.URL.createObjectURL(blob);
@@ -148,12 +185,16 @@
                 a.click();
                 a.remove();
                 
-                // Reset
-                setTimeout(() => location.reload(), 2000);
+                document.getElementById('loading-text').innerText = "Fertig! Download startet.";
+                setTimeout(() => location.reload(), 4000);
 
             } catch (err) {
-                alert("Fehler beim PDF Druck.");
-                location.reload();
+                // WICHTIG: Hier zeigen wir den Fehler an und laden NICHT neu
+                alert("Hoppla! Es gab ein Problem bei der Erstellung:\n\n" + err.message.slice(0, 300));
+                
+                // Wir schicken den User zurück zum Formular, um es nochmal zu versuchen
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step-config').classList.remove('hidden');
             }
         }
     </script>
