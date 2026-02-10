@@ -16,25 +16,27 @@ const port = process.env.PORT || 8080;
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 app.use(cors());
 
-// Assets Route (Bedient robot.png UND logo.png)
+// Assets Route
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-// Lastenheft 3.1: Max 4 Bilder
+// Lastenheft: Max 4 Bilder
 const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 } });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Security: Magic Bytes (Lastenheft 5.1)
+// Security: Magic Bytes
 async function validateImageHeader(filepath) {
-    const buffer = Buffer.alloc(4);
-    const fd = fs.openSync(filepath, 'r');
-    fs.readSync(fd, buffer, 0, 4, 0);
-    fs.closeSync(fd);
-    const hex = buffer.toString('hex').toUpperCase();
-    return hex.startsWith('FFD8') || hex.startsWith('89504E47');
+    try {
+        const buffer = Buffer.alloc(4);
+        const fd = fs.openSync(filepath, 'r');
+        fs.readSync(fd, buffer, 0, 4, 0);
+        fs.closeSync(fd);
+        const hex = buffer.toString('hex').toUpperCase();
+        return hex.startsWith('FFD8') || hex.startsWith('89504E47');
+    } catch (e) { return false; }
 }
 
 function escapeLatex(text) {
@@ -67,8 +69,7 @@ app.post('/analyze', upload.array('hefteintrag', 4), async (req, res) => {
         }));
 
         const result = await model.generateContent([
-            `Analysiere den Inhalt. Gib Fach (wähle aus: Mathematik, Deutsch, Englisch, Latein, Französisch, Physik, Chemie, Wirtschaft und Recht, Musik, Spanisch, Italienisch, Griechisch, Sonstiges), Klasse (5-13 als Zahl) und ein kurzes Thema zurück.
-             JSON Format: { "fach": "...", "klasse": "...", "thema": "..." }`,
+            `Analysiere den Inhalt. Gib Fach, Klasse (Zahl) und Thema zurück. JSON: { "fach": "...", "klasse": "...", "thema": "..." }`,
             ...imageParts
         ]);
         
@@ -77,7 +78,8 @@ app.post('/analyze', upload.array('hefteintrag', 4), async (req, res) => {
         res.json(JSON.parse(text));
     } catch (err) {
         req.files?.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
-        res.status(500).json({error: "Analyse fehlgeschlagen (API Limit oder Dateifehler)."});
+        console.error("Analyse Fehler:", err);
+        res.status(500).json({error: "Analyse fehlgeschlagen."});
     }
 });
 
@@ -90,6 +92,7 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const { userFach, userKlasse, userThema, examType } = req.body;
         const isEx = examType === 'ex';
         
+        // Security Check
         for (const file of files) {
             if (!await validateImageHeader(file.path)) throw new Error("Security: Ungültiges Dateiformat.");
         }
@@ -98,21 +101,20 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
         }));
 
-        // Lastenheft 3.3: AFB 40/40/20 & Modell 2.5 Flash
         const systemPrompt = isEx 
-            ? `Erstelle eine Stegreifaufgabe (20 Min, 3-4 Aufgaben). Fokus: Stoff der letzten 2 Stunden (Bilder). AFB Verteilung: 40% I, 40% II, 20% III.`
-            : `Erstelle eine Schulaufgabe (60 Min, 5-6 Aufgaben). Fokus: Gesamte Lernsequenz. AFB Verteilung: 40% I, 40% II, 20% III.`;
+            ? `Erstelle eine Stegreifaufgabe (20 Min, 3-4 Aufgaben). Fokus: Stoff der letzten 2 Stunden. AFB: 40/40/20.`
+            : `Erstelle eine Schulaufgabe (60 Min, 5-6 Aufgaben). Fokus: Gesamte Sequenz. AFB: 40/40/20.`;
 
         const prompt = `
             ${systemPrompt}
             Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
             Regeln:
-            1. Nutze bayerische Operatoren (Nenne, Berechne, Begründe).
+            1. Nutze bayerische Operatoren.
             2. LaTeX für Mathe ($...$).
             JSON Structure:
             {
                 "titel": "${userThema}",
-                "hilfsmittel": "${isEx ? 'Keine' : 'WTR, Merkhilfe, Formelsammlung'}",
+                "hilfsmittel": "${isEx ? 'Keine' : 'WTR, Merkhilfe'}",
                 "aufgaben": [ { "text": "Aufgabentext...", "afb": "AFB I", "be": 5 } ]
             }
         `;
@@ -121,7 +123,7 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const result = await model.generateContent([prompt, ...imageParts]);
         const data = JSON.parse(result.response.text());
 
-        // Layout Berechnung
+        // Layout
         let totalBE = 0;
         let taskHeaders = "";
         let maxBERow = "";
@@ -137,8 +139,23 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const gradeColDef = "|c|X|X|X|X|X|X|"; 
         const notenSchluessel = calculateNotenschluessel(totalBE);
         
-        // WICHTIG: Hier nutzen wir jetzt logo.png für das PDF!
-        const logoPath = path.resolve(__dirname, 'assets/logo.png');
+        // --- LOGO FIX v1.12: Copy to Temp ---
+        // Wir kopieren das Logo direkt neben die .tex Datei. Damit findet LaTeX es garantiert.
+        let logoLatex = `\\textbf{\\Large efectoTEC}`; // Fallback Text
+        const sourceLogo = path.join(__dirname, 'assets', 'logo.png');
+        const targetLogo = path.join(tempDir, `logo_${runId}.png`); // Unique Name
+
+        try {
+            if (fs.existsSync(sourceLogo)) {
+                fs.copyFileSync(sourceLogo, targetLogo);
+                // LaTeX nutzt jetzt den lokalen Dateinamen ohne Pfadstress
+                logoLatex = `\\raisebox{-0.5\\height}{\\includegraphics[height=1.5cm]{logo_${runId}.png}}`;
+            } else {
+                console.warn("WARNUNG: logo.png fehlt im assets Ordner:", sourceLogo);
+            }
+        } catch (e) {
+            console.error("Logo Copy Error:", e);
+        }
 
         let taskLatex = "";
         data.aufgaben.forEach((t, i) => {
@@ -150,7 +167,6 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             `;
         });
 
-        // LASTENHEFT 4.1 Header & 4.2 Footer & 4.3 Tabelle
         const texContent = `
         \\documentclass[a4paper,11pt]{article}
         \\usepackage[utf8]{inputenc}
@@ -161,11 +177,9 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         
         \\geometry{a4paper, top=2cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=3.5cm}
         \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
-        
-        % Tabellen-Zentrierung (Lastenheft 4.3)
         \\newcolumntype{Y}{>{\\centering\\arraybackslash}X}
         
-        % Footer (Lastenheft 4.2 - Seite X von Y)
+        % Footer
         \\pagestyle{fancy}
         \\fancyhf{}
         \\renewcommand{\\headrulewidth}{0pt}
@@ -174,24 +188,18 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
 
         \\begin{document}
 
-            % --- HEADER GRID (Lastenheft 4.1) ---
-            % Zeile 1: Logo (links) | Titel (mitte) | Name (rechts)
+            % --- HEADER GRID ---
             \\noindent
             \\begin{tabularx}{\\textwidth}{@{}l X r@{}}
-                \\raisebox{-0.5\\height}{\\includegraphics[height=1.5cm]{${logoPath.replace(/\\/g, '/')}}} & 
+                ${logoLatex} & 
                 \\centering \\Large \\textbf{1. ${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'}} & 
                 Name: \\luecke{5cm} \\\\
             \\end{tabularx}
             
             \\vspace{0.4cm}
-            
-            % Zeile 2: Metadaten A
             \\noindent
             \\textbf{Fach:} ${escapeLatex(userFach)} \\hfill \\textbf{Klasse:} ${escapeLatex(userKlasse)} \\hfill \\textbf{Datum:} \\today
-            
             \\vspace{0.2cm}
-            
-            % Zeile 3: Metadaten B
             \\noindent
             \\textbf{Zeit:} ${isEx ? '20 Min.' : '60 Min.'} \\hfill \\textbf{Hilfsmittel:} ${escapeLatex(data.hilfsmittel)}
             
@@ -204,23 +212,19 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             \\end{center}
             \\vspace{0.5cm}
 
-            % AUFGABEN
             ${taskLatex}
 
-            % ABSCHLUSS (Lastenheft 4.2)
             \\vfill
             \\begin{center}
                 \\small \\textit{Viel Erfolg bei deiner ${isEx ? 'EX' : 'SA'} wünscht dir efectoTEC!}
             \\end{center}
 
-            % BEWERTUNGSTABELLE (Lastenheft 4.3 - Zentriert)
             \\noindent
             \\textbf{Bewertung:}
             \\begin{center}
             \\begin{minipage}{\\textwidth}
                 \\centering
                 \\renewcommand{\\arraystretch}{1.4}
-                % Punkte
                 \\begin{tabularx}{\\textwidth}{${taskColDef}}
                     \\hline
                     \\textbf{Aufg.} &${taskHeaders} \\textbf{Gesamt} \\\\
@@ -230,10 +234,7 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
                     Err. &${emptyRow}  \\\\
                     \\hline
                 \\end{tabularx}
-                
                 \\vspace{0.2cm}
-                
-                % Noten
                 \\begin{tabularx}{\\textwidth}{${gradeColDef}}
                     \\hline
                     \\textbf{Note} & 1 & 2 & 3 & 4 & 5 & 6 \\\\
@@ -241,35 +242,39 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
                     Pkte & ${notenSchluessel[1]} & ${notenSchluessel[2]} & ${notenSchluessel[3]} & ${notenSchluessel[4]} & ${notenSchluessel[5]} & ${notenSchluessel[6]} \\\\
                     \\hline
                 \\end{tabularx}
-                
                 \\vspace{0.8cm}
                 \\Large \\textbf{Erreichte Punkte:} \\luecke{2cm} / ${totalBE} \\quad \\textbf{Note:} \\luecke{2cm}
             \\end{minipage}
             \\end{center}
-
         \\end{document}
         `;
 
         const texPath = path.join(tempDir, `task_${runId}.tex`);
         fs.writeFileSync(texPath, texContent);
 
-        // --- DOUBLE COMPILE LOOP (Fix für Seite ?? von ??) ---
+        // --- ROBUST COMPILE ---
         const compile = (cmd) => new Promise((resolve, reject) => {
-            exec(cmd, (err) => err ? reject(err) : resolve());
+            exec(cmd, (err, stdout, stderr) => {
+                if (err) {
+                    console.error("LaTeX Error Log:", stdout); 
+                    return reject(err);
+                }
+                resolve();
+            });
         });
 
         const cmd = `pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texPath}"`;
         
-        // 1. Durchlauf (erzeugt .aux)
-        await compile(cmd);
-        // 2. Durchlauf (löst Referenzen auf)
-        await compile(cmd);
+        await compile(cmd); // Pass 1
+        await compile(cmd); // Pass 2
 
         const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
         
         const cleanup = () => {
             try {
                 files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path) }); 
+                // Wir löschen auch das kopierte Logo
+                if (fs.existsSync(targetLogo)) fs.unlinkSync(targetLogo);
                 [".tex", ".pdf", ".log", ".aux"].forEach(ext => {
                     const p = path.join(tempDir, `task_${runId}${ext}`);
                     if (fs.existsSync(p)) fs.unlinkSync(p);
@@ -281,13 +286,14 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             res.download(pdfPath, `efectoTEC_${examType.toUpperCase()}_${userFach}.pdf`, cleanup);
         } else {
             cleanup();
-            res.status(500).send("PDF Fehler.");
+            res.status(500).send("PDF Fehler: Datei wurde nicht erstellt. Siehe Server Logs.");
         }
 
     } catch (err) {
+        console.error("CRITICAL ERROR:", err);
         files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
-        res.status(500).send(err.message);
+        res.status(500).send("Fehler bei der Generierung: " + err.message);
     }
 });
 
-app.listen(port, () => console.log(`efectoTEC v1.10 (Double-Compile & Logo Fix) running on port ${port}`));
+app.listen(port, () => console.log(`efectoTEC v1.12 (Robust Logo) running on port ${port}`));

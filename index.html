@@ -56,7 +56,7 @@
                         Ich bestätige, dass die Fotos <b>keine personenbezogenen Daten</b> (Namen, Gesichter) enthalten.
                     </label>
                 </div>
-                <i class="fas fa-info-circle text-blue-400 text-xs cursor-help" title="Cleaner-Skript löscht Daten nach 60s. Verschlüsselte Übertragung."></i>
+                <i class="fas fa-info-circle text-blue-400 text-xs cursor-pointer hover:scale-110 transition" onclick="showInfo('privacy')" title="Infos zum Datenschutz"></i>
             </div>
 
             <button onclick="startAnalysis()" id="btn-analyze" disabled class="w-full mt-3 bg-slate-800 text-white py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex justify-center items-center gap-2 text-xs opacity-50 cursor-not-allowed">
@@ -113,8 +113,8 @@
                 </div>
 
                 <div class="flex gap-2 mt-2 mb-4">
-                     <span class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-help" title="40% I / 40% II / 20% III"><i class="fas fa-info-circle"></i> AFB-Verteilung</span>
-                     <span class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-help" title="GSO Standard (45% = Note 4)"><i class="fas fa-info-circle"></i> Notenfaktor</span>
+                     <span onclick="showInfo('afb')" class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-pointer hover:bg-slate-50"><i class="fas fa-info-circle"></i> AFB-Verteilung</span>
+                     <span onclick="showInfo('noten')" class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-pointer hover:bg-slate-50"><i class="fas fa-info-circle"></i> Notenfaktor</span>
                 </div>
 
                 <div class="grid grid-cols-2 gap-2">
@@ -140,15 +140,51 @@
         </div>
         
         <div class="mt-4 pt-2 border-t border-slate-100 flex justify-between items-center text-[9px] text-slate-400">
-             <span>Version v1.10</span>
-             <span class="flex items-center gap-1"><i class="fas fa-lock text-green-500"></i> Datenschutz aktiv</span>
+             <span>Version v1.11</span>
+             <span class="flex items-center gap-1 cursor-pointer" onclick="showInfo('privacy')"><i class="fas fa-lock text-green-500"></i> Datenschutz aktiv</span>
         </div>
 
+    </div>
+
+    <div id="info-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm" onclick="closeInfo()">
+        <div class="bg-white rounded-xl shadow-2xl p-5 max-w-xs w-full animate-[float_0.3s_ease-out]" onclick="event.stopPropagation()">
+            <div class="flex justify-between items-center mb-3">
+                <h3 id="modal-title" class="font-bold text-slate-800 text-sm">Info</h3>
+                <button onclick="closeInfo()" class="text-slate-400 hover:text-red-500"><i class="fas fa-times"></i></button>
+            </div>
+            <p id="modal-text" class="text-xs text-slate-600 leading-relaxed"></p>
+            <button onclick="closeInfo()" class="mt-4 w-full bg-slate-100 text-slate-600 py-2 rounded text-xs font-bold hover:bg-slate-200">Verstanden</button>
+        </div>
     </div>
 
     <script>
         let collectedFiles = [];
 
+        // --- INFO MODAL LOGIK ---
+        function showInfo(type) {
+            const modal = document.getElementById('info-modal');
+            const title = document.getElementById('modal-title');
+            const text = document.getElementById('modal-text');
+            
+            if (type === 'privacy') {
+                title.innerText = "Datenschutz & Cleaner 🔒";
+                text.innerText = "Deine Bilder werden verschlüsselt übertragen und nur im flüchtigen RAM verarbeitet. 60 Sekunden nach der PDF-Erstellung löscht unser Cleaner-Skript alle temporären Dateien (.tex, .pdf, .log) restlos vom Server.";
+            } else if (type === 'afb') {
+                title.innerText = "Anforderungsbereiche (AFB)";
+                text.innerText = "Bayerische Prüfungen müssen AFB I (Reproduktion), AFB II (Anwendung) und AFB III (Transfer) abdecken. Unser Generator nutzt die empfohlene 40/40/20-Verteilung.";
+            } else if (type === 'noten') {
+                title.innerText = "Bewertung & Noten";
+                text.innerText = "Der Notenschlüssel folgt dem bayerischen Standard (GSO). Note 4 wird bei ca. 45-50% der Punkte erreicht. Ab Klasse 11 werden automatisch Punkte (0-15) verwendet.";
+            }
+            
+            modal.classList.remove('hidden');
+        }
+
+        function closeInfo() {
+            document.getElementById('info-modal').classList.add('hidden');
+        }
+
+        // --- EXISTING LOGIC ---
         function addFiles() {
             const input = document.getElementById('fileInput');
             if (input.files.length > 0) {
@@ -203,8 +239,7 @@
         async function startAnalysis() {
             document.getElementById('step-upload').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            // Nur Roboter-Animation, kein Balken
-            document.getElementById('robot-img').classList.add('robot-action'); 
+            document.getElementById('robot-img').classList.add('robot-action');
 
             const formData = new FormData();
             collectedFiles.forEach(file => formData.append('hefteintrag', file));
@@ -221,7 +256,6 @@
 
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step-config').classList.remove('hidden');
-                // Animation Stop
                 document.getElementById('robot-img').classList.remove('robot-action');
 
             } catch (err) {
@@ -256,7 +290,6 @@
                 document.getElementById('loading-text').innerText = "Fertig! PDF wird geladen.";
                 document.getElementById('robot-img').classList.remove('robot-action');
                 
-                // Show Feedback
                 setTimeout(() => {
                     document.getElementById('loading').classList.add('hidden');
                     document.getElementById('step-feedback').classList.remove('hidden');
