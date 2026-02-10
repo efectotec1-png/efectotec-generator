@@ -27,210 +27,170 @@ if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 } });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// --- SECURITY: MAGIC BYTES CHECK (Lastenheft 5.1) ---
+async function validateImageHeader(filepath) {
+    const buffer = Buffer.alloc(4);
+    const fd = fs.openSync(filepath, 'r');
+    fs.readSync(fd, buffer, 0, 4, 0);
+    fs.closeSync(fd);
+    
+    const hex = buffer.toString('hex').toUpperCase();
+    // JPEG (FFD8...), PNG (89504E47...)
+    if (hex.startsWith('FFD8') || hex.startsWith('89504E47')) {
+        return true;
+    }
+    return false;
+}
+
 // LaTeX Helper
 function escapeLatex(text) {
     if (typeof text !== 'string') return text || "";
-    return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/{/g, '\\{').replace(/}/g, '\\}');
+    return text.replace(/\\/g, '').replace(/_/g, '\\_').replace(/%/g, '\\%').replace(/\$/g, '\\$').replace(/#/g, '\\#');
 }
 
-// Mathe-Logik für Notenschlüssel
-function calculateNotenschluessel(total) {
-    const p = (pct) => Math.round(total * pct);
-    return {
-        1: `${total} - ${p(0.85)}`,
-        2: `${p(0.85)-1} - ${p(0.70)}`,
-        3: `${p(0.70)-1} - ${p(0.55)}`,
-        4: `${p(0.55)-1} - ${p(0.40)}`,
-        5: `${p(0.40)-1} - ${p(0.20)}`,
-        6: `${p(0.20)-1} - 0`
-    };
-}
-
-// 1. Route Startseite
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// 2. Route Analyse
-app.post('/analyze', upload.array('hefteintrag', 3), async (req, res) => {
-    try {
-        if (!req.files) return res.json({});
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        const imageParts = req.files.map(f => ({
-            inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
-        }));
-
-        const result = await model.generateContent([
-            `Analysiere den Inhalt. Gib Fach, Klasse (Zahl) und Thema zurück.
-             JSON Format: { "fach": "...", "klasse": "...", "thema": "..." }`,
-            ...imageParts
-        ]);
-        
-        req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
-        res.json(JSON.parse(result.response.text().replace(/```json|```/g, '').trim()));
-    } catch (err) {
-        // Fehlerbehandlung für 429 API Limit
-        console.error("Analyse Fehler:", err.message);
-        res.status(429).json({error: "Google API Limit erreicht. Bitte warten."});
-    }
-});
-
-// 3. Route Generierung (LAYOUT FINETUNING v1.6)
+// --- HAUPTROUTE ---
 app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
     const runId = Date.now();
+    const files = req.files || [];
+    const { examType } = req.body; // 'ex' oder 'sa'
+
+    console.log(`[${runId}] Start Generierung: ${examType.toUpperCase()} mit ${files.length} Dateien.`);
+
+    if (files.length === 0) return res.status(400).send("Keine Dateien hochgeladen.");
+
     try {
-        const { userFach, userKlasse, userThema, examType } = req.body;
-        const isEx = examType === 'ex';
-        
-        let imageParts = [];
-        if (req.files) {
-            imageParts = req.files.map(f => ({
-                inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
-            }));
+        // 1. Security Check (Magic Bytes)
+        for (const file of files) {
+            const isValid = await validateImageHeader(file.path);
+            if (!isValid) {
+                throw new Error("Sicherheitswarnung: Eine Datei ist kein gültiges Bild (Magic Bytes Check fehlgeschlagen).");
+            }
         }
 
-        const systemPrompt = isEx 
-            ? `Erstelle eine Stegreifaufgabe (Ex, 20 Min). 3 Aufgaben (AFB I-II).`
-            : `Erstelle eine Schulaufgabe (60 Min). 5 Aufgaben (AFB I-III).`;
-
-        const prompt = `
-            ${systemPrompt}
-            Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
-            Regeln:
-            1. Nutze bayerische Operatoren.
-            2. LaTeX für Mathe ($...$).
-            
-            JSON Structure:
-            {
-                "titel": "${userThema}",
-                "hilfsmittel": "${isEx ? 'Keine' : 'WTR, Formelsammlung'}",
-                "aufgaben": [ { "text": "Aufgabentext...", "afb": "AFB I", "be": 5 } ]
+        // 2. Bild-Vorbereitung für Gemini
+        const imageParts = files.map(file => ({
+            inlineData: {
+                data: fs.readFileSync(file.path).toString("base64"),
+                mimeType: file.mimetype
             }
+        }));
+
+        // 3. Prompt Engineering (Lastenheft: AFB 40/40/20 & Didaktik)
+        const userFach = "Mathematik"; // TODO: Im Frontend dropdown hinzufügen, aktuell hardcoded Default
+        const userKlasse = "8a";
+        const examTypeLabel = examType === 'ex' ? 'Stegreifaufgabe' : 'Schulaufgabe';
+        const duration = examType === 'ex' ? '20 Min.' : '60 Min.';
+        
+        // AFB Verteilung Logik
+        const afbInstruction = `
+        STRIKTE ANFORDERUNGSBEREICHE (AFB) - Lastenheft Vorgabe:
+        - 40% AFB I (Reproduktion): Nenne, Beschreibe, Definiere.
+        - 40% AFB II (Reorganisation): Erkläre, Vergleiche, Berechne.
+        - 20% AFB III (Transfer): Beurteile, Übertrage auf neue Kontexte.
         `;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-2.0-flash", // Nutze 2.0 Flash (schnell & gut) oder 1.5 Pro
+            systemInstruction: `Du bist ein bayerischer Gymnasiallehrer. 
+            Erstelle eine ${examTypeLabel} für die Klasse ${userKlasse} im Fach ${userFach}.
+            ${afbInstruction}
+            
+            OUTPUT FORMAT:
+            Gib NUR reinen LaTeX-Code für den 'document'-Body zurück. 
+            Keine Präambel, kein \\begin{document}.
+            Nutze 'tabularx' für Layouts.
+            Erstelle Aufgaben mit Punkten.
+            `
+        });
+
+        const prompt = `
+        Analysiere diese Hefteinträge/Bilder.
+        Erstelle darauf basierend 3-4 prüfungsrelevante Aufgaben.
+        Summe der Punkte: ${examType === 'ex' ? '20' : '60'}.
+        Formatiere Aufgaben sauber mit \\section*{Aufgabe X}.
+        Füge am Ende eine kurze Musterlösung an.
+        `;
+
         const result = await model.generateContent([prompt, ...imageParts]);
-        const data = JSON.parse(result.response.text());
-
-        if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
-
-        // --- LATEX LOGIK ---
-        const logoPath = "/app/assets/logo.png"; 
+        const responseText = result.response.text();
         
-        // Tabellen-Berechnung
-        let totalBE = 0;
-        let taskHeaders = "";
-        let maxBERow = "";
-        let emptyRow = "";
-        
-        data.aufgaben.forEach((t, i) => {
-            totalBE += t.be;
-            taskHeaders += ` ${i+1} &`;
-            maxBERow += ` ${t.be} &`;
-            emptyRow += ` &`;
-        });
-        
-        const taskColDef = "|l|" + "X|".repeat(data.aufgaben.length) + "c|";
-        const gradeColDef = "|l|X|X|X|X|X|X|"; 
-        const notenSchluessel = calculateNotenschluessel(totalBE);
+        const cleanLatexBody = responseText.replace(/```latex/g, '').replace(/```/g, '').trim();
 
-        let taskLatex = "";
-        data.aufgaben.forEach((t, i) => {
-            let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
-            taskLatex += `
-                \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
-                ${content} \\hfill \\textbf{/ ${t.be}~BE}
-                \\vspace{0.8cm}
-            `;
-        });
+        // 4. Notenschlüssel Berechnung (Linear)
+        const maxPunkte = examType === 'ex' ? 20 : 60;
+        const notenSchluessel = {
+            1: Math.floor(maxPunkte * 0.88),
+            2: Math.floor(maxPunkte * 0.74),
+            3: Math.floor(maxPunkte * 0.59),
+            4: Math.floor(maxPunkte * 0.44),
+            5: Math.floor(maxPunkte * 0.20),
+            6: 0
+        };
 
-        // --- PDF TEMPLATE v1.6 (Final Fixes) ---
+        // 5. LaTeX Master-Template (Lastenheft 4.1 & 4.2)
         const texContent = `
         \\documentclass[a4paper,11pt]{article}
-        \\usepackage[utf8]{inputenc}
         \\usepackage[ngerman]{babel}
+        \\usepackage[utf8]{inputenc}
         \\usepackage[T1]{fontenc}
-        \\usepackage{lmodern}
-        \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, array}
-        
-        % GEOMETRY FIX:
-        % includehead = Header zählt zur Seite, drückt Text nach unten -> Keine Überlappung!
-        % headheight = Platz für Logo reservieren (3.5cm)
-        % Ränder = Sauber auf 2.5cm definiert
-        \\geometry{a4paper, top=1.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=3.5cm, includehead}
-        
-        \\linespread{1.2} 
-        \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
-        
-        % Tabellen-Zentrierung
-        \\newcolumntype{Y}{>{\\centering\\arraybackslash}X}
-        \\renewcommand{\\tabularxcolumn}[1]{>{\\centering\\arraybackslash}m{#1}}
+        \\usepackage{amsmath, amssymb}
+        \\usepackage{graphicx}
+        \\usepackage{geometry}
+        \\usepackage{fancyhdr}
+        \\usepackage{tabularx} 
+        \\usepackage{lastpage} % Für "Seite X von Y"
+        \\usepackage{eurosym}
 
-        % HEADER DEFINITION
+        % Layout Setup (Golden Rules & Header Space)
+        \\geometry{a4paper, left=2.5cm, right=2.5cm, top=2cm, bottom=2.5cm, headheight=2.5cm}
+
+        % Header & Footer Definition (Lastenheft)
         \\pagestyle{fancy}
-        \\fancyhf{}
-        \\renewcommand{\\headrulewidth}{0pt}
-        
-        % LOGO LINKS (Höhe angepasst)
-        \\lhead{\\includegraphics[height=2.5cm, keepaspectratio]{${logoPath}}}
-        
-        % INFO RECHTS (Kompakter, damit es nicht in den Rand ragt)
-        \\rhead{
-            \\small
-            \\begin{tabular}{ll}
-                \\textbf{Schuljahr 2026} & \\\\
-                Name: \\luecke{3cm} & Klasse: ${escapeLatex(userKlasse)} \\\\
-                Zeit: ${isEx ? '20 Min.' : '60 Min.'} & Datum: \\luecke{1.5cm} \\\\  % Datum-Linie verkürzt
-                Hilfsmittel: & \\\\
-                ${escapeLatex(data.hilfsmittel)} & 
-            \\end{tabular}
-        }
-        
-        % FOOTER (Nur Seite)
-        \\cfoot{\\thepage}
+        \\fancyhf{} 
+        \\renewcommand{\\headrulewidth}{0pt} % Linie manuell im Body setzen
+        \\fancyfoot[C]{\\small Seite \\thepage\\ von \\pageref{LastPage} \\quad | \\quad efectoTEC | we \\heartsuit\\ ROBOTs}
+
+        \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
 
         \\begin{document}
-            % TITEL (Zentriert unter dem Header)
-            \\vspace*{0.5cm} 
-            \\begin{center}
-                \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'} im Fach ${escapeLatex(userFach)}} \\\\
-                \\large Thema: ${escapeLatex(data.titel)}
-            \\end{center}
+
+            % --- HEADER (Lastenheft 4.1 Tabularx Grid) ---
+            \\noindent
+            \\begin{tabularx}{\\textwidth}{@{}l X r@{}}
+                \\includegraphics[height=1.2cm]{assets/logo.png} & 
+                \\centering \\Large \\textbf{1. ${examTypeLabel} aus der ${userFach}} & 
+                Name: \\luecke{4cm} \\\\
+                 & 
+                \\centering \\small Klasse: ${userKlasse} \\quad Datum: \\today & 
+                Hilfsmittel: WTR, Merkhilfe \\\\
+            \\end{tabularx}
+            \\vspace{0.2cm}
+            \\hrule
             \\vspace{0.5cm}
 
-            % AUFGABEN
-            ${taskLatex}
+            % --- INHALT VOM KI-MODELL ---
+            ${cleanLatexBody}
 
-            % BEWERTUNG (Am Ende)
+            % --- ABSCHLUSS & BEWERTUNG ---
             \\vfill
+            \\begin{center}
+                \\small \\textit{Viel Erfolg bei deiner ${examType === 'ex' ? 'EX' : 'SA'} wünscht dir efectoTEC!}
+            \\end{center}
+            
+            \\noindent
+            \\textbf{Bewertung:}
             \\begin{minipage}{\\textwidth}
-                \\section*{Bewertung}
-                \\renewcommand{\\arraystretch}{1.4}
-                
-                % PUNKTE TABELLE
-                \\begin{tabularx}{\\textwidth}{${taskColDef}}
+                \\centering
+                \\begin{tabularx}{\\textwidth}{|X|c|c|c|c|c|c|}
                     \\hline
-                    \\textbf{Aufgabe} &${taskHeaders} \\textbf{Gesamt} \\\\
+                    Note & 1 & 2 & 3 & 4 & 5 & 6 \\\\
                     \\hline
-                    Max. BE &${maxBERow} \\textbf{${totalBE}} \\\\
-                    \\hline
-                    Erreicht &${emptyRow}  \\\\
+                    Pkte & ab ${notenSchluessel[1]} & ab ${notenSchluessel[2]} & ab ${notenSchluessel[3]} & ab ${notenSchluessel[4]} & ab ${notenSchluessel[5]} & < ${notenSchluessel[5]} \\\\
                     \\hline
                 \\end{tabularx}
                 
                 \\vspace{0.5cm}
-                
-                % NOTEN TABELLE
-                \\begin{tabularx}{\\textwidth}{${gradeColDef}}
-                    \\hline
-                    \\textbf{Note} & 1 & 2 & 3 & 4 & 5 & 6 \\\\
-                    \\hline
-                    Pkte & ${notenSchluessel[1]} & ${notenSchluessel[2]} & ${notenSchluessel[3]} & ${notenSchluessel[4]} & ${notenSchluessel[5]} & ${notenSchluessel[6]} \\\\
-                    \\hline
-                \\end{tabularx}
-                
-                \\vspace{1cm}
-                \\Large \\textbf{Note:} \\luecke{3cm} \\hfill \\small \\textit{Viel Erfolg wünscht Dir efectoTEC!}
+                \\Large \\textbf{Erreichte Punkte:} \\luecke{2cm} / ${maxPunkte} \\quad \\textbf{Note:} \\luecke{2cm}
             \\end{minipage}
 
         \\end{document}
@@ -239,23 +199,45 @@ app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
         const texPath = path.join(tempDir, `task_${runId}.tex`);
         fs.writeFileSync(texPath, texContent);
 
+        // PDF Kompilierung
         exec(`pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texPath}"`, (err) => {
             const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
+            
+            // Cleanup Funktion (Privacy by Design - sofortiges Löschen)
+            const cleanup = () => {
+                try {
+                    files.forEach(f => fs.unlinkSync(f.path)); // Uploads löschen
+                    [".tex", ".pdf", ".log", ".aux"].forEach(ext => {
+                        const p = path.join(tempDir, `task_${runId}${ext}`);
+                        if (fs.existsSync(p)) fs.unlinkSync(p);
+                    });
+                    console.log(`[${runId}] Cleanup complete (Privacy-by-Design).`);
+                } catch(e) { console.error("Cleanup Error:", e); }
+            };
+
             if (fs.existsSync(pdfPath)) {
-                res.download(pdfPath, `efectoTEC_${userFach}.pdf`, () => {
-                   try { 
-                       [".tex", ".pdf", ".log", ".aux"].forEach(ext => fs.unlinkSync(path.join(tempDir, `task_${runId}${ext}`)));
-                   } catch(e){}
-                });
+                res.download(pdfPath, `efectoTEC_${examType.toUpperCase()}_${runId}.pdf`, cleanup);
             } else {
-                res.status(500).send("PDF Fehler (LaTeX Compile Failed)");
+                cleanup();
+                console.error("PDF Error:", err);
+                res.status(500).send("PDF Generierung fehlgeschlagen. (LaTeX Error)");
             }
         });
 
-    } catch (err) {
-        console.error("Generierungs Fehler:", err.message);
-        res.status(500).send("Server Fehler: " + err.message);
+    } catch (error) {
+        console.error("Critical Error:", error);
+        files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); }); // Notfall Cleanup
+        res.status(500).send(error.message);
     }
 });
 
-app.listen(port, () => console.log(`v1.6 Final Ready on ${port}`));
+// Fallback Frontend
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.listen(port, () => {
+    console.log(`efectoTEC Generator v1.7 running on port ${port}`);
+    console.log(`- Lastenheft v7.0 Compliance: ACTIVE`);
+    console.log(`- Security: Magic Bytes ACTIVE`);
+});
