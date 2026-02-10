@@ -12,22 +12,17 @@ require('dotenv').config();
 const app = express();
 const port = process.env.PORT || 8080;
 
-// Security: Rate Limiting
 app.use(rateLimit({ windowMs: 15*60*1000, max: 100 }));
 app.use(cors());
-
-// Assets Route
 app.use('/assets', express.static(path.join(__dirname, 'assets')));
 
 const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
-// Lastenheft: Max 4 Bilder
 const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 } });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Security: Magic Bytes
 async function validateImageHeader(filepath) {
     try {
         const buffer = Buffer.alloc(4);
@@ -39,9 +34,16 @@ async function validateImageHeader(filepath) {
     } catch (e) { return false; }
 }
 
+// LaTeX Härtung (v1.14 Standard)
 function escapeLatex(text) {
     if (typeof text !== 'string') return text || "";
-    return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/{/g, '\\{').replace(/}/g, '\\}');
+    return text
+        .replace(/\\/g, '')
+        .replace(/([&%$#_{}])/g, '\\$1')
+        .replace(/~/g, '$\\sim$')
+        .replace(/\^/g, '\\^{}')
+        .replace(/\[/g, '{[}').replace(/\]/g, '{]}')
+        .replace(/\"/g, "''");
 }
 
 function calculateNotenschluessel(total) {
@@ -58,7 +60,6 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Analyse Route
 app.post('/analyze', upload.array('hefteintrag', 4), async (req, res) => {
     try {
         if (!req.files || req.files.length === 0) return res.json({});
@@ -78,12 +79,10 @@ app.post('/analyze', upload.array('hefteintrag', 4), async (req, res) => {
         res.json(JSON.parse(text));
     } catch (err) {
         req.files?.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
-        console.error("Analyse Fehler:", err);
         res.status(500).json({error: "Analyse fehlgeschlagen."});
     }
 });
 
-// Generierung Route
 app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
     const runId = Date.now();
     const files = req.files || [];
@@ -92,7 +91,6 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const { userFach, userKlasse, userThema, examType } = req.body;
         const isEx = examType === 'ex';
         
-        // Security Check
         for (const file of files) {
             if (!await validateImageHeader(file.path)) throw new Error("Security: Ungültiges Dateiformat.");
         }
@@ -111,6 +109,7 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             Regeln:
             1. Nutze bayerische Operatoren.
             2. LaTeX für Mathe ($...$).
+            3. Teilaufgaben (a, b, c) sollen logisch getrennt sein.
             JSON Structure:
             {
                 "titel": "${userThema}",
@@ -123,7 +122,6 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const result = await model.generateContent([prompt, ...imageParts]);
         const data = JSON.parse(result.response.text());
 
-        // Layout
         let totalBE = 0;
         let taskHeaders = "";
         let maxBERow = "";
@@ -139,31 +137,34 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const gradeColDef = "|c|X|X|X|X|X|X|"; 
         const notenSchluessel = calculateNotenschluessel(totalBE);
         
-        // --- LOGO FIX v1.12: Copy to Temp ---
-        // Wir kopieren das Logo direkt neben die .tex Datei. Damit findet LaTeX es garantiert.
-        let logoLatex = `\\textbf{\\Large efectoTEC}`; // Fallback Text
+        // SAFE LOGO COPY
+        let logoLatex = `\\textbf{\\Large efectoTEC}`;
         const sourceLogo = path.join(__dirname, 'assets', 'logo.png');
-        const targetLogo = path.join(tempDir, `logo_${runId}.png`); // Unique Name
+        const targetLogo = path.join(tempDir, `logo_${runId}.png`);
 
         try {
             if (fs.existsSync(sourceLogo)) {
                 fs.copyFileSync(sourceLogo, targetLogo);
-                // LaTeX nutzt jetzt den lokalen Dateinamen ohne Pfadstress
                 logoLatex = `\\raisebox{-0.5\\height}{\\includegraphics[height=1.5cm]{logo_${runId}.png}}`;
-            } else {
-                console.warn("WARNUNG: logo.png fehlt im assets Ordner:", sourceLogo);
             }
-        } catch (e) {
-            console.error("Logo Copy Error:", e);
-        }
+        } catch (e) { }
 
         let taskLatex = "";
         data.aufgaben.forEach((t, i) => {
+            if(!t.text) return; 
+            
             let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
+            
+            // --- LAYOUT FIX v1.15: Teilaufgaben auf neue Zeile ---
+            // Sucht nach a), b), c) am Zeilenanfang oder nach Leerzeichen und erzwingt Umbruch
+            content = content.replace(/(\s|^)([a-e])\)/g, "\\\\ \\textbf{$2)}");
+
             taskLatex += `
                 \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
-                ${content} \\hfill \\textbf{/ ${t.be}~BE}
-                \\vspace{0.5cm}
+                ${content}
+                % LAYOUT FIX v1.15: BE rechtsbündig in neuer Zeile
+                \\par \\raggedleft \\textbf{/ ${t.be}~BE}
+                \\vspace{0.3cm}
             `;
         });
 
@@ -175,35 +176,41 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         \\usepackage{lmodern}
         \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, array, eurosym}
         
-        \\geometry{a4paper, top=2cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=3.5cm}
+        \\geometry{a4paper, top=2cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=4cm}
         \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
         \\newcolumntype{Y}{>{\\centering\\arraybackslash}X}
         
-        % Footer
         \\pagestyle{fancy}
         \\fancyhf{}
         \\renewcommand{\\headrulewidth}{0pt}
         \\fancyfoot[L]{\\small Seite \\thepage\\ von \\pageref{LastPage}}
+        % LAYOUT FIX v1.15: Erfolg nur noch im Footer
         \\fancyfoot[R]{\\small Viel Erfolg wünscht dir efectoTEC!}
 
         \\begin{document}
-
-            % --- HEADER GRID ---
+            % --- HEADER FIX v1.15 ---
             \\noindent
             \\begin{tabularx}{\\textwidth}{@{}l X r@{}}
                 ${logoLatex} & 
-                \\centering \\Large \\textbf{1. ${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'}} & 
-                Name: \\luecke{5cm} \\\\
+                % Titel ohne "1."
+                \\centering \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'}} & 
+                % Datum unter Name gestapelt
+                \\begin{tabular}[t]{@{}r@{}}
+                    Name: \\luecke{5cm} \\\\[0.8em]
+                    Datum: \\today
+                \\end{tabular} \\\\
             \\end{tabularx}
             
-            \\vspace{0.4cm}
-            \\noindent
-            \\textbf{Fach:} ${escapeLatex(userFach)} \\hfill \\textbf{Klasse:} ${escapeLatex(userKlasse)} \\hfill \\textbf{Datum:} \\today
-            \\vspace{0.2cm}
-            \\noindent
-            \\textbf{Zeit:} ${isEx ? '20 Min.' : '60 Min.'} \\hfill \\textbf{Hilfsmittel:} ${escapeLatex(data.hilfsmittel)}
-            
             \\vspace{0.3cm}
+            
+            % Metadaten Zeile (Kompakt)
+            \\noindent
+            \\textbf{Fach:} ${escapeLatex(userFach)} \\hfill 
+            \\textbf{Klasse:} ${escapeLatex(userKlasse)} \\hfill 
+            \\textbf{Zeit:} ${isEx ? '20 Min.' : '60 Min.'} \\hfill 
+            \\textbf{Hilfsmittel:} ${escapeLatex(data.hilfsmittel)}
+            
+            \\vspace{0.2cm}
             \\hrule
             \\vspace{0.5cm}
 
@@ -215,14 +222,13 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             ${taskLatex}
 
             \\vfill
-            \\begin{center}
-                \\small \\textit{Viel Erfolg bei deiner ${isEx ? 'EX' : 'SA'} wünscht dir efectoTEC!}
-            \\end{center}
 
-            \\noindent
-            \\textbf{Bewertung:}
+            % BEWERTUNG (Sticky Header Fix v1.15)
             \\begin{center}
             \\begin{minipage}{\\textwidth}
+                \\noindent \\textbf{Bewertung:} % Überschrift gehört zur Tabelle
+                \\vspace{0.2cm}
+                
                 \\centering
                 \\renewcommand{\\arraystretch}{1.4}
                 \\begin{tabularx}{\\textwidth}{${taskColDef}}
@@ -252,28 +258,25 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         const texPath = path.join(tempDir, `task_${runId}.tex`);
         fs.writeFileSync(texPath, texContent);
 
-        // --- ROBUST COMPILE ---
         const compile = (cmd) => new Promise((resolve, reject) => {
             exec(cmd, (err, stdout, stderr) => {
                 if (err) {
-                    console.error("LaTeX Error Log:", stdout); 
-                    return reject(err);
+                    const errorDetails = stdout.slice(-300); 
+                    return reject(new Error("LaTeX Error: " + errorDetails));
                 }
                 resolve();
             });
         });
 
         const cmd = `pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texPath}"`;
-        
-        await compile(cmd); // Pass 1
-        await compile(cmd); // Pass 2
+        await compile(cmd); 
+        await compile(cmd); 
 
         const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
         
         const cleanup = () => {
             try {
                 files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path) }); 
-                // Wir löschen auch das kopierte Logo
                 if (fs.existsSync(targetLogo)) fs.unlinkSync(targetLogo);
                 [".tex", ".pdf", ".log", ".aux"].forEach(ext => {
                     const p = path.join(tempDir, `task_${runId}${ext}`);
@@ -286,14 +289,14 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             res.download(pdfPath, `efectoTEC_${examType.toUpperCase()}_${userFach}.pdf`, cleanup);
         } else {
             cleanup();
-            res.status(500).send("PDF Fehler: Datei wurde nicht erstellt. Siehe Server Logs.");
+            res.status(500).send("PDF Fehler: Datei wurde nicht erstellt.");
         }
 
     } catch (err) {
         console.error("CRITICAL ERROR:", err);
         files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
-        res.status(500).send("Fehler bei der Generierung: " + err.message);
+        res.status(500).send(err.message);
     }
 });
 
-app.listen(port, () => console.log(`efectoTEC v1.12 (Robust Logo) running on port ${port}`));
+app.listen(port, () => console.log(`efectoTEC v1.15 (Layout Polished) running on port ${port}`));
