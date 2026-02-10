@@ -24,220 +24,238 @@ const tempDir = os.tmpdir();
 const uploadDir = path.join(tempDir, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
+// LASTENHEFT NEU: Max 4 Bilder (vorher 3)
 const upload = multer({ dest: uploadDir, limits: { fileSize: 10 * 1024 * 1024 } });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- SECURITY: MAGIC BYTES CHECK (Lastenheft 5.1) ---
+// Security: Magic Bytes Check (Lastenheft 5.1)
 async function validateImageHeader(filepath) {
     const buffer = Buffer.alloc(4);
     const fd = fs.openSync(filepath, 'r');
     fs.readSync(fd, buffer, 0, 4, 0);
     fs.closeSync(fd);
-    
     const hex = buffer.toString('hex').toUpperCase();
-    // JPEG (FFD8...), PNG (89504E47...)
-    if (hex.startsWith('FFD8') || hex.startsWith('89504E47')) {
-        return true;
-    }
-    return false;
+    return hex.startsWith('FFD8') || hex.startsWith('89504E47');
 }
 
-// LaTeX Helper
 function escapeLatex(text) {
     if (typeof text !== 'string') return text || "";
-    return text.replace(/\\/g, '').replace(/_/g, '\\_').replace(/%/g, '\\%').replace(/\$/g, '\\$').replace(/#/g, '\\#');
+    return text.replace(/\\/g, '').replace(/([&%$#_])/g, '\\$1').replace(/{/g, '\\{').replace(/}/g, '\\}');
 }
 
-// --- HAUPTROUTE ---
-app.post('/generate', upload.array('hefteintrag', 3), async (req, res) => {
-    const runId = Date.now();
-    const files = req.files || [];
-    const { examType } = req.body; // 'ex' oder 'sa'
+function calculateNotenschluessel(total) {
+    const p = (pct) => Math.round(total * pct);
+    return {
+        1: `${total} - ${p(0.85)}`, 2: `${p(0.85)-1} - ${p(0.70)}`, 3: `${p(0.70)-1} - ${p(0.55)}`,
+        4: `${p(0.55)-1} - ${p(0.40)}`, 5: `${p(0.40)-1} - ${p(0.20)}`, 6: `${p(0.20)-1} - 0`
+    };
+}
 
-    console.log(`[${runId}] Start Generierung: ${examType.toUpperCase()} mit ${files.length} Dateien.`);
+// Route Startseite
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
-    if (files.length === 0) return res.status(400).send("Keine Dateien hochgeladen.");
-
+// Route Analyse
+app.post('/analyze', upload.array('hefteintrag', 4), async (req, res) => {
     try {
-        // 1. Security Check (Magic Bytes)
-        for (const file of files) {
-            const isValid = await validateImageHeader(file.path);
-            if (!isValid) {
-                throw new Error("Sicherheitswarnung: Eine Datei ist kein gültiges Bild (Magic Bytes Check fehlgeschlagen).");
-            }
-        }
-
-        // 2. Bild-Vorbereitung für Gemini
-        const imageParts = files.map(file => ({
-            inlineData: {
-                data: fs.readFileSync(file.path).toString("base64"),
-                mimeType: file.mimetype
-            }
+        if (!req.files || req.files.length === 0) return res.json({});
+        // API FIX: Nutzung von gemini-2.5-flash statt 2.0
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
+        
+        const imageParts = req.files.map(f => ({
+            inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" } // Force JPEG mime for stability
         }));
 
-        // 3. Prompt Engineering (Lastenheft: AFB 40/40/20 & Didaktik)
-        const userFach = "Mathematik"; // TODO: Im Frontend dropdown hinzufügen, aktuell hardcoded Default
-        const userKlasse = "8a";
-        const examTypeLabel = examType === 'ex' ? 'Stegreifaufgabe' : 'Schulaufgabe';
-        const duration = examType === 'ex' ? '20 Min.' : '60 Min.';
+        const result = await model.generateContent([
+            `Analysiere den Inhalt. Gib Fach, Klasse (Zahl) und Thema zurück.
+             JSON Format: { "fach": "...", "klasse": "...", "thema": "..." }`,
+            ...imageParts
+        ]);
         
-        // AFB Verteilung Logik
-        const afbInstruction = `
-        STRIKTE ANFORDERUNGSBEREICHE (AFB) - Lastenheft Vorgabe:
-        - 40% AFB I (Reproduktion): Nenne, Beschreibe, Definiere.
-        - 40% AFB II (Reorganisation): Erkläre, Vergleiche, Berechne.
-        - 20% AFB III (Transfer): Beurteile, Übertrage auf neue Kontexte.
-        `;
+        req.files.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
+        const text = result.response.text().replace(/```json|```/g, '').trim();
+        res.json(JSON.parse(text));
+    } catch (err) {
+        console.error("Analyse Fehler:", err.message);
+        req.files?.forEach(f => { try { fs.unlinkSync(f.path) } catch(e){} });
+        res.status(500).json({error: "Fehler bei der Analyse (evtl. API Limit)."});
+    }
+});
 
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.0-flash", // Nutze 2.0 Flash (schnell & gut) oder 1.5 Pro
-            systemInstruction: `Du bist ein bayerischer Gymnasiallehrer. 
-            Erstelle eine ${examTypeLabel} für die Klasse ${userKlasse} im Fach ${userFach}.
-            ${afbInstruction}
-            
-            OUTPUT FORMAT:
-            Gib NUR reinen LaTeX-Code für den 'document'-Body zurück. 
-            Keine Präambel, kein \\begin{document}.
-            Nutze 'tabularx' für Layouts.
-            Erstelle Aufgaben mit Punkten.
-            `
-        });
+// Route Generierung
+app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
+    const runId = Date.now();
+    const files = req.files || [];
+    
+    try {
+        const { userFach, userKlasse, userThema, examType } = req.body;
+        const isEx = examType === 'ex';
+        
+        // Security Check
+        for (const file of files) {
+            if (!await validateImageHeader(file.path)) throw new Error("Security: Ungültige Datei erkannt.");
+        }
+
+        const imageParts = files.map(f => ({
+            inlineData: { data: fs.readFileSync(f.path).toString("base64"), mimeType: "image/jpeg" }
+        }));
+
+        // Lastenheft: AFB 40/40/20 Verteilung
+        const systemPrompt = isEx 
+            ? `Erstelle eine Stegreifaufgabe (20 Min, 3 Aufgaben). AFB I(40%)/II(40%)/III(20%).`
+            : `Erstelle eine Schulaufgabe (60 Min, 5 Aufgaben). AFB I(40%)/II(40%)/III(20%).`;
 
         const prompt = `
-        Analysiere diese Hefteinträge/Bilder.
-        Erstelle darauf basierend 3-4 prüfungsrelevante Aufgaben.
-        Summe der Punkte: ${examType === 'ex' ? '20' : '60'}.
-        Formatiere Aufgaben sauber mit \\section*{Aufgabe X}.
-        Füge am Ende eine kurze Musterlösung an.
+            ${systemPrompt}
+            Fach: ${userFach}, Klasse: ${userKlasse}, Thema: ${userThema}.
+            Regeln:
+            1. Nutze bayerische Operatoren.
+            2. LaTeX für Mathe ($...$).
+            JSON Structure:
+            {
+                "titel": "${userThema}",
+                "hilfsmittel": "${isEx ? 'Keine' : 'WTR, Merkhilfe'}",
+                "aufgaben": [ { "text": "Aufgabentext...", "afb": "AFB I", "be": 5 } ]
+            }
         `;
 
+        // API FIX: gemini-2.5-flash
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash", generationConfig: { responseMimeType: "application/json" } });
         const result = await model.generateContent([prompt, ...imageParts]);
-        const responseText = result.response.text();
+        const data = JSON.parse(result.response.text());
+
+        // Layout Logik
+        let totalBE = 0;
+        let taskHeaders = "";
+        let maxBERow = "";
+        let emptyRow = "";
+        data.aufgaben.forEach((t, i) => {
+            totalBE += t.be;
+            taskHeaders += ` ${i+1} &`;
+            maxBERow += ` ${t.be} &`;
+            emptyRow += ` &`;
+        });
         
-        const cleanLatexBody = responseText.replace(/```latex/g, '').replace(/```/g, '').trim();
+        const taskColDef = "|l|" + "X|".repeat(data.aufgaben.length) + "c|";
+        const gradeColDef = "|l|X|X|X|X|X|X|"; 
+        const notenSchluessel = calculateNotenschluessel(totalBE);
+        
+        // Logo Pfad für Docker (absolut) - Stellt sicher, dass robot.png genutzt wird
+        const logoPath = path.resolve(__dirname, 'assets/robot.png');
 
-        // 4. Notenschlüssel Berechnung (Linear)
-        const maxPunkte = examType === 'ex' ? 20 : 60;
-        const notenSchluessel = {
-            1: Math.floor(maxPunkte * 0.88),
-            2: Math.floor(maxPunkte * 0.74),
-            3: Math.floor(maxPunkte * 0.59),
-            4: Math.floor(maxPunkte * 0.44),
-            5: Math.floor(maxPunkte * 0.20),
-            6: 0
-        };
+        let taskLatex = "";
+        data.aufgaben.forEach((t, i) => {
+            let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
+            taskLatex += `
+                \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
+                ${content} \\hfill \\textbf{/ ${t.be}~BE}
+                \\vspace{0.6cm}
+            `;
+        });
 
-        // 5. LaTeX Master-Template (Lastenheft 4.1 & 4.2)
+        // LASTENHEFT 4.1 Header (Tabularx Grid)
         const texContent = `
         \\documentclass[a4paper,11pt]{article}
-        \\usepackage[ngerman]{babel}
         \\usepackage[utf8]{inputenc}
+        \\usepackage[ngerman]{babel}
         \\usepackage[T1]{fontenc}
-        \\usepackage{amsmath, amssymb}
-        \\usepackage{graphicx}
-        \\usepackage{geometry}
-        \\usepackage{fancyhdr}
-        \\usepackage{tabularx} 
-        \\usepackage{lastpage} % Für "Seite X von Y"
-        \\usepackage{eurosym}
-
-        % Layout Setup (Golden Rules & Header Space)
-        \\geometry{a4paper, left=2.5cm, right=2.5cm, top=2cm, bottom=2.5cm, headheight=2.5cm}
-
-        % Header & Footer Definition (Lastenheft)
+        \\usepackage{lmodern}
+        \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, array, eurosym}
+        
+        \\geometry{a4paper, top=2cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=2.5cm}
+        \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
+        
+        % Footer (Lastenheft 4.2)
         \\pagestyle{fancy}
-        \\fancyhf{} 
-        \\renewcommand{\\headrulewidth}{0pt} % Linie manuell im Body setzen
+        \\fancyhf{}
+        \\renewcommand{\\headrulewidth}{0pt}
         \\fancyfoot[C]{\\small Seite \\thepage\\ von \\pageref{LastPage} \\quad | \\quad efectoTEC | we \\heartsuit\\ ROBOTs}
 
-        \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
-
         \\begin{document}
-
-            % --- HEADER (Lastenheft 4.1 Tabularx Grid) ---
+            % HEADER GRID
             \\noindent
             \\begin{tabularx}{\\textwidth}{@{}l X r@{}}
-                \\includegraphics[height=1.2cm]{assets/logo.png} & 
-                \\centering \\Large \\textbf{1. ${examTypeLabel} aus der ${userFach}} & 
+                \\includegraphics[height=1.4cm]{${logoPath.replace(/\\/g, '/')}} & 
+                \\centering \\Large \\textbf{1. ${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'} aus der ${escapeLatex(userFach)}} & 
                 Name: \\luecke{4cm} \\\\
                  & 
-                \\centering \\small Klasse: ${userKlasse} \\quad Datum: \\today & 
-                Hilfsmittel: WTR, Merkhilfe \\\\
+                \\centering \\small Klasse: ${escapeLatex(userKlasse)} \\quad Datum: \\today & 
+                Hilfsmittel: ${escapeLatex(data.hilfsmittel)} \\\\
             \\end{tabularx}
             \\vspace{0.2cm}
             \\hrule
             \\vspace{0.5cm}
 
-            % --- INHALT VOM KI-MODELL ---
-            ${cleanLatexBody}
+            \\begin{center}
+                \\large Thema: ${escapeLatex(data.titel)}
+            \\end{center}
+            \\vspace{0.5cm}
 
-            % --- ABSCHLUSS & BEWERTUNG ---
+            ${taskLatex}
+
             \\vfill
             \\begin{center}
-                \\small \\textit{Viel Erfolg bei deiner ${examType === 'ex' ? 'EX' : 'SA'} wünscht dir efectoTEC!}
+                \\small \\textit{Viel Erfolg bei deiner ${isEx ? 'EX' : 'SA'} wünscht dir efectoTEC!}
             \\end{center}
-            
+
             \\noindent
             \\textbf{Bewertung:}
             \\begin{minipage}{\\textwidth}
                 \\centering
-                \\begin{tabularx}{\\textwidth}{|X|c|c|c|c|c|c|}
+                \\renewcommand{\\arraystretch}{1.3}
+                \\begin{tabularx}{\\textwidth}{${taskColDef}}
                     \\hline
-                    Note & 1 & 2 & 3 & 4 & 5 & 6 \\\\
+                    \\textbf{Aufgabe} &${taskHeaders} \\textbf{Gesamt} \\\\
                     \\hline
-                    Pkte & ab ${notenSchluessel[1]} & ab ${notenSchluessel[2]} & ab ${notenSchluessel[3]} & ab ${notenSchluessel[4]} & ab ${notenSchluessel[5]} & < ${notenSchluessel[5]} \\\\
+                    Max. BE &${maxBERow} \\textbf{${totalBE}} \\\\
+                    \\hline
+                    Erreicht &${emptyRow}  \\\\
                     \\hline
                 \\end{tabularx}
-                
+                \\vspace{0.3cm}
+                \\begin{tabularx}{\\textwidth}{${gradeColDef}}
+                    \\hline
+                    \\textbf{Note} & 1 & 2 & 3 & 4 & 5 & 6 \\\\
+                    \\hline
+                    Pkte & ${notenSchluessel[1]} & ${notenSchluessel[2]} & ${notenSchluessel[3]} & ${notenSchluessel[4]} & ${notenSchluessel[5]} & ${notenSchluessel[6]} \\\\
+                    \\hline
+                \\end{tabularx}
                 \\vspace{0.5cm}
-                \\Large \\textbf{Erreichte Punkte:} \\luecke{2cm} / ${maxPunkte} \\quad \\textbf{Note:} \\luecke{2cm}
+                \\Large \\textbf{Erreichte Punkte:} \\luecke{2cm} / ${totalBE} \\quad \\textbf{Note:} \\luecke{2cm}
             \\end{minipage}
-
         \\end{document}
         `;
 
         const texPath = path.join(tempDir, `task_${runId}.tex`);
         fs.writeFileSync(texPath, texContent);
 
-        // PDF Kompilierung
         exec(`pdflatex -interaction=nonstopmode -output-directory="${tempDir}" "${texPath}"`, (err) => {
             const pdfPath = path.join(tempDir, `task_${runId}.pdf`);
             
-            // Cleanup Funktion (Privacy by Design - sofortiges Löschen)
+            // CLEANER (Lastenheft 5.2)
             const cleanup = () => {
                 try {
-                    files.forEach(f => fs.unlinkSync(f.path)); // Uploads löschen
+                    files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path) }); 
                     [".tex", ".pdf", ".log", ".aux"].forEach(ext => {
                         const p = path.join(tempDir, `task_${runId}${ext}`);
                         if (fs.existsSync(p)) fs.unlinkSync(p);
                     });
-                    console.log(`[${runId}] Cleanup complete (Privacy-by-Design).`);
-                } catch(e) { console.error("Cleanup Error:", e); }
+                } catch(e) {}
             };
 
             if (fs.existsSync(pdfPath)) {
-                res.download(pdfPath, `efectoTEC_${examType.toUpperCase()}_${runId}.pdf`, cleanup);
+                res.download(pdfPath, `efectoTEC_${examType.toUpperCase()}.pdf`, cleanup);
             } else {
                 cleanup();
-                console.error("PDF Error:", err);
-                res.status(500).send("PDF Generierung fehlgeschlagen. (LaTeX Error)");
+                res.status(500).send("PDF Fehler (LaTeX Compile Failed).");
             }
         });
 
-    } catch (error) {
-        console.error("Critical Error:", error);
-        files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); }); // Notfall Cleanup
-        res.status(500).send(error.message);
+    } catch (err) {
+        files.forEach(f => { if(fs.existsSync(f.path)) fs.unlinkSync(f.path); });
+        res.status(500).send(err.message);
     }
 });
 
-// Fallback Frontend
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.listen(port, () => {
-    console.log(`efectoTEC Generator v1.7 running on port ${port}`);
-    console.log(`- Lastenheft v7.0 Compliance: ACTIVE`);
-    console.log(`- Security: Magic Bytes ACTIVE`);
-});
+app.listen(port, () => console.log(`efectoTEC v1.9 (Compliance Update) running on port ${port}`));
