@@ -157,11 +157,13 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             // Teilaufgaben Umbruch
             content = content.replace(/(\s|^)([a-e])\)/g, "\\\\ \\textbf{$2)}");
 
-            // DESIGN FIX: AFB kleiner & ohne Klammern | Punkte rechtsbündig
             taskLatex += `
                 \\section*{Aufgabe ${i+1} \\quad \\footnotesize ${escapeLatex(t.afb)}}
                 ${content}
-                \\par \\vspace{0.2cm} \\raggedleft \\textbf{/ ${t.be}~BE}
+                
+                % FIX v1.18: Scoped Group { ... } verhindert, dass rechtsbündig auf nächste Aufgabe überspringt
+                {\\par \\vspace{0.1cm} \\raggedleft \\textbf{/ ${t.be}~BE} \\par}
+                
                 \\vspace{0.3cm}
             `;
         });
@@ -174,7 +176,7 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         \\usepackage{lmodern}
         \\usepackage{amsmath, amssymb, geometry, fancyhdr, graphicx, tabularx, lastpage, array, eurosym}
         
-        \\geometry{a4paper, top=2cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=4cm}
+        \\geometry{a4paper, top=2cm, bottom=2.5cm, left=2.5cm, right=2.5cm, headheight=4.5cm}
         \\newcommand{\\luecke}[1]{\\underline{\\hspace{#1}}}
         \\newcolumntype{Y}{>{\\centering\\arraybackslash}X}
         
@@ -185,19 +187,18 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         \\fancyfoot[R]{\\small Viel Erfolg wünscht dir efectoTEC!}
 
         \\begin{document}
-            % --- HEADER FIX v1.16 (Name/Datum Flucht) ---
+            % --- HEADER (v1.17 Perfect Alignment) ---
             \\noindent
             \\begin{tabularx}{\\textwidth}{@{}l X r@{}}
                 ${logoLatex} & 
                 \\centering \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'}} & 
-                % NEU: 'l' statt 'r' sorgt für linke Flucht innerhalb des Blocks
-                \\begin{tabular}[t]{@{}l@{}}
-                    Name: \\luecke{5cm} \\\\[0.8em]
-                    Datum: \\today
+                \\begin{tabular}[b]{ll} 
+                    Name: & \\luecke{4.5cm} \\\\[0.5em]
+                    Datum: & \\today
                 \\end{tabular} \\\\
             \\end{tabularx}
             
-            \\vspace{0.3cm}
+            \\vspace{0.4cm}
             
             \\noindent
             \\textbf{Fach:} ${escapeLatex(userFach)} \\hfill 
@@ -293,4 +294,4 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`efectoTEC v1.16 (Layout: Aligned & Clean) running on port ${port}`));
+app.listen(port, () => console.log(`efectoTEC v1.18 (Fix: Alignment Leak) running on port ${port}`));
