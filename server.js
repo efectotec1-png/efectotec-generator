@@ -34,7 +34,6 @@ async function validateImageHeader(filepath) {
     } catch (e) { return false; }
 }
 
-// LaTeX Härtung (v1.14 Standard)
 function escapeLatex(text) {
     if (typeof text !== 'string') return text || "";
     return text
@@ -155,15 +154,14 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             
             let content = t.text.replace(/{{LUECKE}}/g, "\\luecke{4cm}");
             
-            // --- LAYOUT FIX v1.15: Teilaufgaben auf neue Zeile ---
-            // Sucht nach a), b), c) am Zeilenanfang oder nach Leerzeichen und erzwingt Umbruch
+            // Teilaufgaben Umbruch
             content = content.replace(/(\s|^)([a-e])\)/g, "\\\\ \\textbf{$2)}");
 
+            // DESIGN FIX: AFB kleiner & ohne Klammern | Punkte rechtsbündig
             taskLatex += `
-                \\section*{Aufgabe ${i+1} \\small{(${escapeLatex(t.afb)})}}
+                \\section*{Aufgabe ${i+1} \\quad \\footnotesize ${escapeLatex(t.afb)}}
                 ${content}
-                % LAYOUT FIX v1.15: BE rechtsbündig in neuer Zeile
-                \\par \\raggedleft \\textbf{/ ${t.be}~BE}
+                \\par \\vspace{0.2cm} \\raggedleft \\textbf{/ ${t.be}~BE}
                 \\vspace{0.3cm}
             `;
         });
@@ -184,18 +182,16 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
         \\fancyhf{}
         \\renewcommand{\\headrulewidth}{0pt}
         \\fancyfoot[L]{\\small Seite \\thepage\\ von \\pageref{LastPage}}
-        % LAYOUT FIX v1.15: Erfolg nur noch im Footer
         \\fancyfoot[R]{\\small Viel Erfolg wünscht dir efectoTEC!}
 
         \\begin{document}
-            % --- HEADER FIX v1.15 ---
+            % --- HEADER FIX v1.16 (Name/Datum Flucht) ---
             \\noindent
             \\begin{tabularx}{\\textwidth}{@{}l X r@{}}
                 ${logoLatex} & 
-                % Titel ohne "1."
                 \\centering \\Large \\textbf{${isEx ? 'Stegreifaufgabe' : 'Schulaufgabe'}} & 
-                % Datum unter Name gestapelt
-                \\begin{tabular}[t]{@{}r@{}}
+                % NEU: 'l' statt 'r' sorgt für linke Flucht innerhalb des Blocks
+                \\begin{tabular}[t]{@{}l@{}}
                     Name: \\luecke{5cm} \\\\[0.8em]
                     Datum: \\today
                 \\end{tabular} \\\\
@@ -203,7 +199,6 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
             
             \\vspace{0.3cm}
             
-            % Metadaten Zeile (Kompakt)
             \\noindent
             \\textbf{Fach:} ${escapeLatex(userFach)} \\hfill 
             \\textbf{Klasse:} ${escapeLatex(userKlasse)} \\hfill 
@@ -223,10 +218,9 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
 
             \\vfill
 
-            % BEWERTUNG (Sticky Header Fix v1.15)
             \\begin{center}
             \\begin{minipage}{\\textwidth}
-                \\noindent \\textbf{Bewertung:} % Überschrift gehört zur Tabelle
+                \\noindent \\textbf{Bewertung:}
                 \\vspace{0.2cm}
                 
                 \\centering
@@ -299,4 +293,4 @@ app.post('/generate', upload.array('hefteintrag', 4), async (req, res) => {
     }
 });
 
-app.listen(port, () => console.log(`efectoTEC v1.15 (Layout Polished) running on port ${port}`));
+app.listen(port, () => console.log(`efectoTEC v1.16 (Layout: Aligned & Clean) running on port ${port}`));
