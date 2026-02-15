@@ -3,195 +3,318 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>efectoTEC Generator</title>
+    <meta name="app-version" content="v1.76">
+    <title>efectoTEC Generator v1.76</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
+        /* Safety First */
+        .hidden { display: none !important; }
+
+        /* Animationen */
         @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-3px); } 100% { transform: translateY(0px); } }
         .robot-float { animation: float 3s ease-in-out infinite; }
         
-        @keyframes action { 
-            0% { transform: translateY(0px) rotate(0deg) scale(1); } 
-            25% { transform: translateY(-4px) rotate(8deg) scale(1.05); } 
-            50% { transform: translateY(0px) rotate(0deg) scale(1); } 
-            75% { transform: translateY(4px) rotate(-8deg) scale(1.05); } 
-            100% { transform: translateY(0px) rotate(0deg) scale(1); } 
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .robot-spin { animation: spin 2s linear infinite; }
+
+        @keyframes heartbeat { 
+            0% { transform: scale(0.6); } 
+            15% { transform: scale(1.0); } 
+            30% { transform: scale(0.6); } 
+            45% { transform: scale(0.9); } 
+            60% { transform: scale(0.6); } 
         }
-        .robot-action { animation: action 1s ease-in-out infinite; }
+        .heart-beat { animation: heartbeat 1.5s infinite; }
+
+        @keyframes huge-beat {
+            0% { transform: scale(0.5); opacity: 0; }
+            20% { transform: scale(1.0); opacity: 1; }
+            50% { transform: scale(3.0); opacity: 1; }
+            100% { transform: scale(1); opacity: 0; }
+        }
+        .heart-huge { animation: huge-beat 0.8s ease-out !important; }
+
         body { font-size: 13px; font-family: 'Inter', sans-serif; } 
     </style>
 </head>
 <body class="bg-gradient-to-b from-slate-50 to-blue-50 min-h-screen flex items-start justify-center pt-10 sm:items-center sm:pt-0 p-2">
 
-    <div class="bg-white p-4 rounded-xl shadow-xl w-full max-w-md border border-slate-200 relative overflow-hidden">
+    <div class="bg-white p-4 rounded-xl shadow-xl w-full max-w-md border border-slate-200 relative overflow-hidden min-h-[500px] flex flex-col justify-between transition-all duration-300">
         
-        <div class="text-center mb-4 relative z-10">
-            <p class="text-blue-700 tracking-wider text-[11px] mb-1 font-black">
-                <span class="font-black text-blue-800">efectoTEC</span> we ❤️ ROBOTs
-            </p>
-            <h1 class="text-xl font-extrabold text-slate-800 leading-tight">Dein Schulaufgaben-GENERATOR</h1>
-            <div class="flex justify-center mt-3 mb-2">
-                <div class="bg-slate-800 rounded-full w-16 h-16 flex items-center justify-center shadow-md border-2 border-white">
-                    <img src="/assets/robot.png" id="robot-img" class="h-10 w-auto robot-float" alt="Roboter">
-                </div>
-            </div>
-        </div>
-
-        <div id="step-upload" class="transition-all duration-300">
-            <div class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:bg-blue-50 transition cursor-pointer group bg-slate-50" onclick="document.getElementById('fileInput').click()">
-                <div class="bg-white w-8 h-8 rounded-full flex items-center justify-center mx-auto mb-2 shadow-sm group-hover:scale-110 transition">
-                    <i class="fas fa-cloud-upload-alt text-lg text-blue-500"></i>
-                </div>
-                <p class="text-slate-700 font-bold text-xs">Hier Beispielaufgaben & Hefteinträge aus Datei ablegen</p>
-                <p class="text-[9px] text-slate-400 mt-0.5">(Max. 4 Bilder)</p>
-                <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="addFiles()">
-            </div>
-            
-            <div id="preview-grid" class="grid grid-cols-4 gap-2 mt-2 empty:hidden"></div>
-            
-            <div class="mt-4 flex items-start gap-2 bg-blue-50 p-2 rounded border border-blue-100">
-                <input type="checkbox" id="privacyCheck" class="mt-0.5 accent-blue-600" onchange="toggleAnalyzeBtn()">
-                <div class="flex-1">
-                    <label for="privacyCheck" class="text-[10px] text-slate-600 leading-tight block cursor-pointer font-medium">
-                        Ich bestätige, dass die Fotos <b>keine personenbezogenen Daten</b> (Namen, Gesichter) enthalten.
-                    </label>
-                </div>
-                <i class="fas fa-info-circle text-blue-400 text-xs cursor-pointer hover:scale-110 transition" onclick="showInfo('privacy')" title="Infos zum Datenschutz"></i>
-            </div>
-
-            <button onclick="startAnalysis()" id="btn-analyze" disabled class="w-full mt-3 bg-slate-800 text-white py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex justify-center items-center gap-2 text-xs opacity-50 cursor-not-allowed">
-                <i class="fas fa-search"></i> Daten prüfen
-            </button>
-        </div>
-
-        <div id="loading" class="hidden text-center py-8">
-            <p id="loading-text" class="text-slate-700 font-bold text-sm animate-pulse mb-2">Ich entschlüssle deine Sauklaue 😂</p>
-        </div>
-
-        <div id="step-config" class="hidden animate-fade-in">
-            <div class="flex justify-between items-center mb-2">
-                <span class="text-[10px] uppercase font-bold text-slate-500">Erkannte Daten prüfen</span>
-                <span class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded">G9-Ready</span>
-            </div>
-
-            <form id="generateForm">
-                <div class="space-y-2">
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Fach</label>
-                            <select id="input-fach" name="userFach" class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700">
-                                <option value="Mathematik">Mathematik</option>
-                                <option value="Deutsch">Deutsch</option>
-                                <option value="Englisch">Englisch</option>
-                                <option value="Latein">Latein</option>
-                                <option value="Französisch">Französisch</option>
-                                <option value="Physik">Physik</option>
-                                <option value="Chemie">Chemie</option>
-                                <option value="Wirtschaft und Recht">Wirtschaft & Recht</option>
-                                <option value="Sonstiges">Sonstiges</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Klasse</label>
-                            <select id="input-klasse" name="userKlasse" class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700">
-                                <option value="5">5. Klasse</option>
-                                <option value="6">6. Klasse</option>
-                                <option value="7">7. Klasse</option>
-                                <option value="8">8. Klasse</option>
-                                <option value="9" selected>9. Klasse</option>
-                                <option value="10">10. Klasse</option>
-                                <option value="11">11. Klasse (Q11)</option>
-                                <option value="12">12. Klasse (Q12)</option>
-                                <option value="13">13. Klasse</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Thema</label>
-                        <input type="text" id="input-thema" name="userThema" class="w-full rounded border border-slate-300 px-2 py-2 text-xs font-bold">
+        <div>
+            <div class="text-center mb-1 relative z-10">
+                <p class="text-blue-700 tracking-wider text-[11px] mb-1 font-black">
+                    <span class="font-black text-blue-800">efectoTEC</span> we ❤️ ROBOTs
+                </p>
+                <h1 class="text-xl font-extrabold text-slate-800 leading-tight">Dein Schulaufgaben-GENERATOR</h1>
+                
+                <div class="flex justify-center mt-3 mb-1 relative">
+                    <div class="bg-slate-800 rounded-full w-16 h-16 flex items-center justify-center shadow-md border-2 border-white relative z-10">
+                        <img src="/assets/robot.png" id="robot-img" class="h-10 w-auto robot-float" alt="Roboter">
+                        <div id="robot-heart" class="hidden absolute top-4 text-2xl drop-shadow-md">❤️</div>
                     </div>
                 </div>
-
-                <div class="flex gap-2 mt-2 mb-4">
-                     <span onclick="showInfo('afb')" class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-pointer hover:bg-slate-50"><i class="fas fa-info-circle"></i> AFB-Verteilung</span>
-                     <span onclick="showInfo('noten')" class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-pointer hover:bg-slate-50"><i class="fas fa-info-circle"></i> Notenfaktor</span>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2">
-                    <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-700 py-3 rounded-lg font-bold hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center group shadow-sm">
-                        <i class="fas fa-bolt text-yellow-500 mb-1 text-lg group-hover:scale-110 transition"></i>
-                        <span class="text-xs">EX (20 Min)</span>
-                    </button>
-                    <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition shadow flex flex-col items-center justify-center group">
-                        <i class="fas fa-graduation-cap text-slate-200 mb-1 text-lg group-hover:scale-110 transition"></i>
-                        <span class="text-xs">SA (60 Min)</span>
-                    </button>
-                </div>
-            </form>
-        </div>
-
-        <div id="step-feedback" class="hidden text-center mt-6 pt-4 border-t border-slate-100">
-            <p class="text-xs font-bold text-slate-600 mb-2">War diese Übung hilfreich?</p>
-            <div class="flex justify-center gap-4">
-                <button class="text-xl hover:scale-125 transition">👍</button>
-                <button class="text-xl hover:scale-125 transition">👎</button>
             </div>
-            <button onclick="location.reload()" class="mt-4 text-[10px] text-blue-500 hover:underline">Neue Schulaufgabe erstellen</button>
+
+            <div id="content-area" class="mt-2">
+
+                <div id="step-upload" class="transition-all duration-300">
+                    
+                    <p class="text-left text-slate-700 font-bold text-xs mb-3 ml-1">Hier Beispielaufgaben & Hefteinträge ablegen:</p>
+                    
+                    <div class="grid grid-cols-3 gap-2 mb-4">
+                        <div id="slot-0" onclick="document.getElementById('fileInput').click()" class="cursor-pointer hover:bg-blue-50 transition aspect-square rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 text-slate-400 relative overflow-hidden group">
+                            <i class="fas fa-plus text-xl group-hover:scale-110 transition"></i>
+                        </div>
+                        <div id="slot-1" onclick="document.getElementById('fileInput').click()" class="cursor-pointer hover:bg-blue-50 transition aspect-square rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 text-slate-400 relative overflow-hidden group">
+                            <i class="fas fa-plus text-xl group-hover:scale-110 transition"></i>
+                        </div>
+                        <div id="slot-2" onclick="document.getElementById('fileInput').click()" class="cursor-pointer hover:bg-blue-50 transition aspect-square rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 text-slate-400 relative overflow-hidden group">
+                            <i class="fas fa-plus text-xl group-hover:scale-110 transition"></i>
+                        </div>
+                    </div>
+                    
+                    <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="addFiles()">
+
+                    <div class="flex items-start gap-2 bg-blue-50 p-2 rounded border border-blue-100 mt-4">
+                        <input type="checkbox" id="privacyCheck" class="mt-1 accent-blue-600" onchange="toggleAnalyzeBtn()">
+                        <div class="flex-1">
+                            <label for="privacyCheck" class="text-[10px] text-slate-600 leading-tight block cursor-pointer font-medium">
+                                Ich bestätige, dass die Fotos<br>
+                                <span class="font-bold">keine personenbezogenen Daten</span><br>
+                                (Namen, Gesichter) enthalten.
+                            </label>
+                        </div>
+                    </div>
+
+                    <button onclick="startAnalysis()" id="btn-analyze" disabled class="w-full mt-3 bg-slate-800 text-white py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex justify-center items-center gap-2 text-xs opacity-50 cursor-not-allowed">
+                        <i class="fas fa-search"></i> Daten prüfen
+                    </button>
+                </div>
+
+                <div id="loading" class="hidden text-center py-8">
+                    <p id="loading-text" class="text-slate-700 font-bold text-sm animate-pulse mb-2">Lade...</p>
+                </div>
+
+                <div id="step-config" class="hidden animate-fade-in">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-[10px] uppercase font-bold text-slate-500">Erkannte Daten prüfen</span>
+                        <button onclick="showInfo('g9')" class="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold hover:bg-green-200 transition shadow-sm border border-green-200">
+                            G9-Ready <i class="fas fa-check-circle ml-0.5"></i>
+                        </button>
+                    </div>
+
+                    <form id="generateForm">
+                        <div class="space-y-2">
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Fach</label>
+                                    <select id="input-fach" name="userFach" class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700">
+                                        <option value="Mathematik">Mathematik</option>
+                                        <option value="Deutsch">Deutsch</option>
+                                        <option value="Englisch">Englisch</option>
+                                        <option value="Latein">Latein</option>
+                                        <option value="Französisch">Französisch</option>
+                                        <option value="Physik">Physik</option>
+                                        <option value="Chemie">Chemie</option>
+                                        <option value="Wirtschaft und Recht">Wirtschaft & Recht</option>
+                                        <option value="Sonstiges">Sonstiges</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Klasse</label>
+                                    <select id="input-klasse" name="userKlasse" class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700">
+                                        <option value="5">5. Klasse</option>
+                                        <option value="6">6. Klasse</option>
+                                        <option value="7">7. Klasse</option>
+                                        <option value="8">8. Klasse</option>
+                                        <option value="9" selected>9. Klasse</option>
+                                        <option value="10">10. Klasse</option>
+                                        <option value="11">11. Klasse (Q11)</option>
+                                        <option value="12">12. Klasse (Q12)</option>
+                                        <option value="13">13. Klasse</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Thema</label>
+                                <input type="text" id="input-thema" name="userThema" class="w-full rounded border border-slate-300 px-2 py-2 text-xs font-bold">
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2 mt-2 mb-4">
+                            <span onclick="showInfo('afb')" class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-pointer hover:bg-slate-50"><i class="fas fa-info-circle"></i> AFB-Verteilung</span>
+                            <span onclick="showInfo('noten')" class="text-[9px] text-slate-400 border border-slate-200 rounded px-1 cursor-pointer hover:bg-slate-50"><i class="fas fa-info-circle"></i> Notenfaktor</span>
+                            <span onclick="showInfo('examType')" class="text-[9px] text-blue-500 border border-blue-200 rounded px-1 cursor-pointer hover:bg-blue-50 font-bold"><i class="fas fa-info-circle"></i> Ex/SA Info</span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2">
+                            <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-700 py-3 rounded-lg font-bold hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center gap-1 group shadow-sm h-16">
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-bolt text-yellow-500 text-sm group-hover:scale-110 transition"></i>
+                                    <span class="text-[10px] uppercase tracking-wide">20 Min</span>
+                                </div>
+                                <span class="text-xs">Stegreifaufgabe</span>
+                            </button>
+                            <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition shadow flex flex-col items-center justify-center gap-1 group h-16">
+                                <div class="flex items-center gap-1">
+                                    <i class="fas fa-graduation-cap text-slate-200 text-sm group-hover:scale-110 transition"></i>
+                                    <span class="text-[10px] uppercase tracking-wide">60 Min</span>
+                                </div>
+                                <span class="text-xs">Schulaufgabe</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <div id="step-feedback" class="hidden text-center mt-6 pt-4 border-t border-slate-100">
+                    <p class="text-xs font-bold text-slate-600 mb-2">War diese Übung hilfreich?</p>
+                    <div class="flex justify-center gap-4 mb-3">
+                        <button onclick="voteUp()" class="text-xl hover:scale-125 transition">👍</button>
+                        <button class="text-xl hover:scale-125 transition">👎</button>
+                    </div>
+                    
+                    <a href="mailto:generator@efectoTEC.de?subject=Feedback v1.76" class="block w-full bg-slate-50 hover:bg-slate-100 text-slate-500 text-[10px] py-2 rounded mb-3 border border-slate-100 transition">
+                        <i class="far fa-envelope mr-1"></i> Feedback senden
+                    </a>
+
+                    <button onclick="location.reload()" class="text-[10px] text-blue-500 hover:underline font-bold">Neustart</button>
+                </div>
+            </div>
         </div>
         
-        <div class="mt-4 pt-2 border-t border-slate-100 flex justify-between items-center text-[9px] text-slate-400">
-             <span>Version v1.11</span>
-             <span class="flex items-center gap-1 cursor-pointer" onclick="showInfo('privacy')"><i class="fas fa-lock text-green-500"></i> Datenschutz aktiv</span>
+        <div class="mt-auto pt-2">
+            <div class="border-t border-slate-100 flex justify-between items-center text-[9px] text-slate-400 py-2">
+                <span>Version v1.76</span>
+                <span class="flex items-center gap-1 cursor-pointer" onclick="showInfo('privacy')"><i class="fas fa-lock text-green-500"></i> Datenschutz aktiv</span>
+            </div>
+
+            <div class="text-center text-[8px] text-slate-300 pb-1">
+                <span onclick="showInfo('impressum')" class="cursor-pointer hover:text-slate-500">Impressum</span> &bull; 
+                <span onclick="showInfo('datenschutz')" class="cursor-pointer hover:text-slate-500">Datenschutz</span>
+            </div>
         </div>
 
     </div>
 
     <div id="info-modal" class="fixed inset-0 bg-black/50 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm" onclick="closeInfo()">
-        <div class="bg-white rounded-xl shadow-2xl p-5 max-w-xs w-full animate-[float_0.3s_ease-out]" onclick="event.stopPropagation()">
+        <div class="bg-white rounded-xl shadow-2xl p-5 max-w-xs w-full animate-[float_0.3s_ease-out] max-h-[80vh] overflow-y-auto" onclick="event.stopPropagation()">
             <div class="flex justify-between items-center mb-3">
                 <h3 id="modal-title" class="font-bold text-slate-800 text-sm">Info</h3>
                 <button onclick="closeInfo()" class="text-slate-400 hover:text-red-500"><i class="fas fa-times"></i></button>
             </div>
-            <p id="modal-text" class="text-xs text-slate-600 leading-relaxed"></p>
+            <div id="modal-text" class="text-xs text-slate-600 leading-relaxed"></div>
             <button onclick="closeInfo()" class="mt-4 w-full bg-slate-100 text-slate-600 py-2 rounded text-xs font-bold hover:bg-slate-200">Verstanden</button>
         </div>
     </div>
 
     <script>
         let collectedFiles = [];
+        let timerInterval;
 
-        // --- INFO MODAL LOGIK ---
+        const genSprueche = [
+            "Mir pocht das Herz schon vor Aufregung! ❤️",
+            "Ich freu mich auf die Aufgaben!",
+            "Prüfungsangst ist wie Übertakten bei optimaler Belüftung 💻",
+            "Ich bin top vorbereitet! Du auch?",
+            "Gleich geht's los... Spannung steigt!"
+        ];
+
+        const anaSprueche = [
+            "Ich entschlüssle deine Sauklaue... 🧐",
+            "Das ist aber harter Stoff... 📚",
+            "Scanne Pixel für Pixel... 🤖",
+            "Hoffentlich kann ich das lesen... 😅"
+        ];
+
+        window.onload = function() {
+            const klasseSelect = document.getElementById('input-klasse');
+            if (klasseSelect && !klasseSelect.value) klasseSelect.value = "9";
+        };
+
         function showInfo(type) {
             const modal = document.getElementById('info-modal');
             const title = document.getElementById('modal-title');
             const text = document.getElementById('modal-text');
             
+            modal.classList.remove('hidden');
+
             if (type === 'privacy') {
                 title.innerText = "Datenschutz & Cleaner 🔒";
-                text.innerText = "Deine Bilder werden verschlüsselt übertragen und nur im flüchtigen RAM verarbeitet. 60 Sekunden nach der PDF-Erstellung löscht unser Cleaner-Skript alle temporären Dateien (.tex, .pdf, .log) restlos vom Server.";
+                text.innerHTML = "Deine Bilder werden verschlüsselt übertragen und nur im flüchtigen RAM verarbeitet. 60 Sekunden nach der PDF-Erstellung löscht unser Cleaner-Skript alle temporären Dateien (.tex, .pdf, .log) restlos vom Server.";
+            } else if (type === 'examType') {
+                title.innerText = "Prüfungsarten";
+                text.innerHTML = `
+                    <strong>⚡ Stegreifaufgabe (Ex):</strong><br>
+                    Umfasst den Stoff der letzten 2 Unterrichtsstunden. Zeit zum Lösen der Aufgaben ca. 20 Min.<br><br>
+                    <strong>🎓 Schulaufgabe (SA):</strong><br>
+                    Umfasst den Stoff einer gesamten Lernsequenz (mehrere Wochen). Zeit zum Lösen der Aufgaben ca. 60 Min.
+                `;
             } else if (type === 'afb') {
                 title.innerText = "Anforderungsbereiche (AFB)";
                 text.innerText = "Bayerische Prüfungen müssen AFB I (Reproduktion), AFB II (Anwendung) und AFB III (Transfer) abdecken. Unser Generator nutzt die empfohlene 40/40/20-Verteilung.";
             } else if (type === 'noten') {
                 title.innerText = "Bewertung & Noten";
                 text.innerText = "Der Notenschlüssel folgt dem bayerischen Standard (GSO). Note 4 wird bei ca. 45-50% der Punkte erreicht. Ab Klasse 11 werden automatisch Punkte (0-15) verwendet.";
+            } else if (type === 'impressum') {
+                title.innerText = "Impressum";
+                text.innerHTML = `
+                    <strong>Angaben gemäß § 5 TMG</strong><br>
+                    EfectoTEC Christian Unger<br>
+                    Inhaber: Christian Unger<br>
+                    Tannholzstraße 4<br>
+                    86424 Dinkelscherben<br>
+                    Deutschland<br><br>
+                    <strong>Kontakt:</strong><br>
+                    Telefon: 0151 50011381<br>
+                    Mail: generator@efectoTEC.de<br><br>
+                    <strong>Umsatzsteuer-ID:</strong><br>
+                    DE321863048<br>
+                    <em>Kleinunternehmer gemäß § 19 UStG</em>
+                `;
+            } else if (type === 'datenschutz') {
+                title.innerText = "Datenschutzerklärung";
+                text.innerHTML = "Wir speichern keine personenbezogenen Daten. Uploads dienen ausschließlich der temporären Verarbeitung und werden sofort gelöscht.<br><br>Hosting: Google Cloud Europe.";
+            } else if (type === 'g9') {
+                title.innerText = "G9-Ready 🚀";
+                text.innerHTML = `
+                    <p class="mb-2">Das Programm ist exakt auf den <strong>neuen Lehrplan Plus</strong> und die veränderte Taktung des neunjährigen Gymnasiums zugeschnitten. Das heißt:</p>
+                    <ul class="list-disc pl-4 space-y-1 mb-2">
+                        <li><strong>Stoffverteilung:</strong> Es berücksichtigt, dass Themen, die im G8 in Klasse 9 dran waren, im G9 vielleicht erst in Klasse 10 kommen.</li>
+                        <li><strong>Vertiefung:</strong> Es bietet mehr Übungsmaterial für die neu gewonnenen "Intensivierungsstunden".</li>
+                        <li><strong>Oberstufen-Fokus:</strong> Es ist auf die neuen Prüfungsformate des ersten G9-Abis (ab 2026) vorbereitet.</li>
+                    </ul>
+                `;
             }
-            
-            modal.classList.remove('hidden');
         }
 
         function closeInfo() {
             document.getElementById('info-modal').classList.add('hidden');
         }
 
-        // --- EXISTING LOGIC ---
+        function voteUp() {
+            const heart = document.getElementById('robot-heart');
+            heart.classList.remove('hidden');
+            heart.classList.add('heart-huge');
+            setTimeout(() => {
+                heart.classList.remove('heart-huge');
+                heart.classList.add('hidden');
+            }, 750);
+        }
+
         function addFiles() {
             const input = document.getElementById('fileInput');
             if (input.files.length > 0) {
-                const remainingSlots = 4 - collectedFiles.length;
+                const remainingSlots = 3 - collectedFiles.length;
+                if (remainingSlots <= 0) {
+                    alert("Maximal 3 Bilder erlaubt!");
+                    input.value = '';
+                    return;
+                }
                 const filesToAdd = Array.from(input.files).slice(0, remainingSlots);
                 filesToAdd.forEach(f => collectedFiles.push(f));
-                if (input.files.length > remainingSlots) alert("Maximal 4 Bilder erlaubt!");
+                if (input.files.length > remainingSlots) alert("Maximal 3 Bilder erlaubt!");
             }
             updatePreview();
             input.value = ''; 
@@ -199,20 +322,27 @@
         }
 
         function updatePreview() {
-            const grid = document.getElementById('preview-grid');
-            grid.innerHTML = ''; 
+            for(let i=0; i<3; i++) {
+                const slot = document.getElementById(`slot-${i}`);
+                slot.innerHTML = `<i class="fas fa-plus text-xl group-hover:scale-110 transition"></i>`;
+                slot.className = "cursor-pointer hover:bg-blue-50 transition aspect-square rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 text-slate-400 relative overflow-hidden group";
+                slot.onclick = () => document.getElementById('fileInput').click();
+            }
+
             collectedFiles.forEach((file, idx) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const div = document.createElement('div');
-                    div.className = 'aspect-square bg-slate-100 rounded-lg overflow-hidden border border-slate-200 relative group';
-                    div.innerHTML = `
-                        <img src="${e.target.result}" class="w-full h-full object-cover">
-                        <button onclick="removeFile(${idx})" class="absolute inset-0 bg-red-500/50 text-white opacity-0 group-hover:opacity-100 transition flex items-center justify-center"><i class="fas fa-times"></i></button>
-                    `;
-                    grid.appendChild(div);
-                };
-                reader.readAsDataURL(file);
+                if(idx < 3) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const slot = document.getElementById(`slot-${idx}`);
+                        slot.className = "aspect-square rounded-lg border border-slate-200 relative group overflow-hidden";
+                        slot.onclick = null; 
+                        slot.innerHTML = `
+                            <img src="${e.target.result}" class="w-full h-full object-cover">
+                            <button onclick="removeFile(${idx})" class="absolute inset-0 bg-red-500/50 text-white opacity-0 group-hover:opacity-100 transition flex items-center justify-center"><i class="fas fa-times"></i></button>
+                        `;
+                    };
+                    reader.readAsDataURL(file);
+                }
             });
         }
 
@@ -236,10 +366,27 @@
             }
         }
 
+        function startTextRotation(elementId, textArray, intervalTime = 4000) {
+            if(timerInterval) clearInterval(timerInterval);
+            const el = document.getElementById(elementId);
+            
+            const update = () => {
+                const index = Math.floor(Date.now() / intervalTime) % textArray.length;
+                el.innerText = textArray[index];
+            };
+            
+            update(); 
+            timerInterval = setInterval(update, intervalTime);
+        }
+
         async function startAnalysis() {
             document.getElementById('step-upload').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('robot-img').classList.add('robot-action');
+            
+            document.getElementById('robot-img').classList.remove('robot-float');
+            document.getElementById('robot-img').classList.add('robot-spin');
+
+            startTextRotation('loading-text', anaSprueche, 3500);
 
             const formData = new FormData();
             collectedFiles.forEach(file => formData.append('hefteintrag', file));
@@ -251,12 +398,18 @@
                 if (data.error) throw new Error(data.error);
 
                 if(data.fach) document.getElementById('input-fach').value = data.fach;
-                if(data.klasse) document.getElementById('input-klasse').value = data.klasse.replace(/\D/g,'');
+                if(data.klasse) {
+                    const k = data.klasse.replace(/\D/g,'');
+                    if(k) document.getElementById('input-klasse').value = k;
+                }
                 if(data.thema) document.getElementById('input-thema').value = data.thema;
 
+                clearInterval(timerInterval);
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step-config').classList.remove('hidden');
-                document.getElementById('robot-img').classList.remove('robot-action');
+                
+                document.getElementById('robot-img').classList.remove('robot-spin');
+                document.getElementById('robot-img').classList.add('robot-float');
 
             } catch (err) {
                 alert("Fehler: " + err.message);
@@ -267,8 +420,12 @@
         async function submitGeneration(type) {
             document.getElementById('step-config').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
-            document.getElementById('loading-text').innerText = "Schreibe Prüfung... (ca. 20s)";
-            document.getElementById('robot-img').classList.add('robot-action');
+            
+            document.getElementById('robot-img').classList.remove('robot-float'); 
+            document.getElementById('robot-heart').classList.remove('hidden');
+            document.getElementById('robot-heart').classList.add('heart-beat');
+
+            startTextRotation('loading-text', genSprueche, 5000);
 
             const formData = new FormData(document.getElementById('generateForm'));
             collectedFiles.forEach(file => formData.append('hefteintrag', file));
@@ -279,16 +436,28 @@
                 if (!res.ok) throw new Error(await res.text());
                 
                 const blob = await res.blob();
+                const contentDisposition = res.headers.get('Content-Disposition');
+                let filename = `efectoTEC_${type.toUpperCase()}.pdf`;
+                if (contentDisposition) {
+                    const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+                    if (filenameMatch && filenameMatch.length === 2) filename = filenameMatch[1];
+                }
+
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `efectoTEC_${type.toUpperCase()}.pdf`;
+                a.download = filename;
+                a.target = "_blank"; 
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
                 
+                clearInterval(timerInterval);
                 document.getElementById('loading-text').innerText = "Fertig! PDF wird geladen.";
-                document.getElementById('robot-img').classList.remove('robot-action');
+                
+                document.getElementById('robot-heart').classList.add('hidden');
+                document.getElementById('robot-heart').classList.remove('heart-beat');
+                document.getElementById('robot-img').classList.add('robot-float');
                 
                 setTimeout(() => {
                     document.getElementById('loading').classList.add('hidden');
@@ -296,6 +465,7 @@
                 }, 1500);
 
             } catch (err) {
+                clearInterval(timerInterval);
                 alert("Fehler: " + err.message);
                 location.reload();
             }
