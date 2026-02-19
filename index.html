@@ -3,12 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="app-version" content="v1.77">
-    <title>efectoTEC Generator v1.77</title>
-    
+    <meta name="app-version" content="v1.78.2">
+    <title>efectoTEC Generator v1.78</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    
     <style>
         /* Safety First */
         .hidden { display: none !important; }
@@ -63,9 +61,24 @@
 
                 <div id="step-upload" class="transition-all duration-300">
                     
-                    <p class="text-left text-slate-700 font-bold text-xs mb-3 ml-1">Hier Beispielaufgaben & Hefteinträge ablegen:</p>
+                    <div class="grid grid-cols-3 gap-2 mb-3 text-center tracking-wide">
+                        <div class="flex flex-col items-center justify-end">
+                            <div class="text-blue-500 font-black text-[11px] mb-0.5">1. <span class="text-base">📸</span></div>
+                            <div class="text-[10px] font-bold text-blue-600">INFO rein</div>
+                        </div>
+                        <div class="flex flex-col items-center justify-end">
+                            <div class="text-blue-500 font-black text-[11px] mb-0.5">2. <span class="text-base">🤖</span></div>
+                            <div class="text-[10px] font-bold text-blue-600">GENERATOR an</div>
+                        </div>
+                        <div class="flex flex-col items-center justify-end">
+                            <div class="text-blue-500 font-black text-[11px] mb-0.5">3. <span class="text-base">📄</span></div>
+                            <div class="text-[10px] font-bold text-blue-600">PDF raus</div>
+                        </div>
+                    </div>
+
+                    <p class="text-left text-slate-700 font-bold text-xs mb-2 ml-1">Hier Beispielaufgaben & Hefteinträge ablegen:</p>
                     
-                    <div class="grid grid-cols-3 gap-2 mb-4">
+                    <div class="grid grid-cols-3 gap-2 mb-3">
                         <div id="slot-0" onclick="document.getElementById('fileInput').click()" class="cursor-pointer hover:bg-blue-50 transition aspect-square rounded-lg border-2 border-dashed border-slate-300 flex items-center justify-center bg-slate-50 text-slate-400 relative overflow-hidden group">
                             <i class="fas fa-plus text-xl group-hover:scale-110 transition"></i>
                         </div>
@@ -79,7 +92,7 @@
                     
                     <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="addFiles()">
 
-                    <div class="flex items-start gap-2 bg-blue-50 p-2 rounded border border-blue-100 mt-4">
+                    <div id="privacy-container" class="flex items-start gap-2 bg-blue-50 p-2 rounded border border-blue-100 mt-2 transition-colors duration-300">
                         <input type="checkbox" id="privacyCheck" class="mt-1 accent-blue-600" onchange="toggleAnalyzeBtn()">
                         <div class="flex-1">
                             <label for="privacyCheck" class="text-[10px] text-slate-600 leading-tight block cursor-pointer font-medium">
@@ -91,12 +104,13 @@
                     </div>
 
                     <button onclick="startAnalysis()" id="btn-analyze" disabled class="w-full mt-3 bg-slate-800 text-white py-3 rounded-lg font-bold shadow hover:bg-slate-900 transition flex justify-center items-center gap-2 text-xs opacity-50 cursor-not-allowed">
-                        <i class="fas fa-search"></i> Daten prüfen
+                        <i class="fas fa-search"></i> <span id="btn-analyze-text">Jetzt Schulaufgabe vorbereiten</span>
                     </button>
                 </div>
 
                 <div id="loading" class="hidden text-center py-8">
                     <p id="loading-text" class="text-slate-700 font-bold text-sm animate-pulse mb-2">Lade...</p>
+                    <p id="slow-network-warning" class="hidden text-[10px] text-orange-500 font-bold mt-2"><i class="fas fa-wifi"></i> Langsames Netz erkannt, bitte bleib dran...</p>
                 </div>
 
                 <div id="step-config" class="hidden animate-fade-in">
@@ -113,6 +127,7 @@
                                 <div>
                                     <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Fach</label>
                                     <select id="input-fach" name="userFach" class="w-full rounded border border-slate-300 bg-white px-2 py-2 text-xs font-bold text-slate-700">
+                                        <option value="Allgemeinwissen" selected>Allgemeinwissen</option>
                                         <option value="Mathematik">Mathematik</option>
                                         <option value="Deutsch">Deutsch</option>
                                         <option value="Englisch">Englisch</option>
@@ -120,6 +135,8 @@
                                         <option value="Französisch">Französisch</option>
                                         <option value="Physik">Physik</option>
                                         <option value="Chemie">Chemie</option>
+                                        <option value="Biologie">Biologie</option>
+                                        <option value="Geographie">Geographie</option>
                                         <option value="Wirtschaft und Recht">Wirtschaft & Recht</option>
                                         <option value="Sonstiges">Sonstiges</option>
                                     </select>
@@ -131,17 +148,18 @@
                                         <option value="6">6. Klasse</option>
                                         <option value="7">7. Klasse</option>
                                         <option value="8">8. Klasse</option>
-                                        <option value="9" selected>9. Klasse</option>
+                                        <option value="9">9. Klasse</option>
                                         <option value="10">10. Klasse</option>
                                         <option value="11">11. Klasse (Q11)</option>
                                         <option value="12">12. Klasse (Q12)</option>
                                         <option value="13">13. Klasse</option>
+                                        <option value="nicht erkannt" selected>nicht erkannt</option>
                                     </select>
                                 </div>
                             </div>
                             <div>
                                 <label class="block text-[9px] font-bold text-slate-500 uppercase mb-0.5">Thema</label>
-                                <input type="text" id="input-thema" name="userThema" class="w-full rounded border border-slate-300 px-2 py-2 text-xs font-bold">
+                                <input type="text" id="input-thema" name="userThema" placeholder="nicht erkannt" class="w-full rounded border border-slate-300 px-2 py-2 text-xs font-bold">
                             </div>
                         </div>
 
@@ -152,43 +170,54 @@
                         </div>
 
                         <div class="grid grid-cols-2 gap-2">
-                            <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-700 py-3 rounded-lg font-bold hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center gap-1 group shadow-sm h-16">
-                                <div class="flex items-center gap-1">
-                                    <i class="fas fa-bolt text-yellow-500 text-sm group-hover:scale-110 transition"></i>
-                                    <span class="text-[10px] uppercase tracking-wide">20 Min</span>
+                            <button type="button" onclick="submitGeneration('ex')" class="bg-blue-50 text-blue-800 py-3 rounded-lg hover:bg-blue-100 transition border border-blue-200 flex flex-col items-center justify-center gap-1 group shadow-sm h-20">
+                                <div class="flex items-center gap-2">
+                                    <i class="fas fa-bolt text-yellow-500 text-lg group-hover:scale-110 transition"></i>
+                                    <span class="text-xl font-black tracking-tight">EX</span>
                                 </div>
-                                <span class="text-xs">Stegreifaufgabe</span>
+                                <span class="text-[10px] font-medium text-blue-600/80">Stegreifaufgabe</span>
                             </button>
-                            <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-3 rounded-lg font-bold hover:bg-slate-800 transition shadow flex flex-col items-center justify-center gap-1 group h-16">
-                                <div class="flex items-center gap-1">
-                                    <i class="fas fa-graduation-cap text-slate-200 text-sm group-hover:scale-110 transition"></i>
-                                    <span class="text-[10px] uppercase tracking-wide">60 Min</span>
+                            <button type="button" onclick="submitGeneration('sa')" class="bg-slate-900 text-white py-3 rounded-lg hover:bg-slate-800 transition shadow flex flex-col items-center justify-center gap-1 group h-20">
+                                <div class="flex items-center gap-2">
+                                    <i class="fas fa-graduation-cap text-white text-lg group-hover:scale-110 transition"></i>
+                                    <span class="text-xl font-black tracking-tight">SA</span>
                                 </div>
-                                <span class="text-xs">Schulaufgabe</span>
+                                <span class="text-[10px] font-medium text-slate-300">Schulaufgabe</span>
                             </button>
                         </div>
                     </form>
                 </div>
 
-                <div id="step-feedback" class="hidden text-center mt-6 pt-4 border-t border-slate-100">
-                    <p class="text-xs font-bold text-slate-600 mb-2">War diese Übung hilfreich?</p>
-                    <div class="flex justify-center gap-4 mb-3">
-                        <button onclick="voteUp()" class="text-xl hover:scale-125 transition">👍</button>
-                        <button class="text-xl hover:scale-125 transition">👎</button>
-                    </div>
+                <div id="step-feedback" class="hidden text-center mt-2 animate-fade-in">
                     
-                    <a href="mailto:generator@efectoTEC.de?subject=Feedback v1.77" class="block w-full bg-slate-50 hover:bg-slate-100 text-slate-500 text-[10px] py-2 rounded mb-3 border border-slate-100 transition">
-                        <i class="far fa-envelope mr-1"></i> Feedback senden
-                    </a>
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                        <p class="text-blue-800 font-extrabold text-sm mb-1">🎉 Geschafft!</p>
+                        <p class="text-[10px] text-slate-600 mb-3">Deine individuelle Prüfung ist fertig.</p>
+                        <a id="manual-download-btn" href="#" target="_blank" class="block w-full bg-blue-600 text-white font-bold py-3 rounded-lg shadow-lg hover:bg-blue-700 hover:scale-[1.02] transition">
+                            <i class="fas fa-file-pdf mr-1"></i> Prüfung öffnen (PDF)
+                        </a>
+                    </div>
 
-                    <button onclick="location.reload()" class="text-[10px] text-blue-500 hover:underline font-bold">Neustart</button>
+                    <div class="pt-2 border-t border-slate-100">
+                        <p class="text-xs font-bold text-slate-600 mb-2">War diese Übung hilfreich?</p>
+                        <div class="flex justify-center gap-4 mb-3">
+                            <button onclick="voteUp()" class="text-2xl hover:scale-125 transition drop-shadow-sm">👍</button>
+                            <button class="text-2xl hover:scale-125 transition drop-shadow-sm">👎</button>
+                        </div>
+                        
+                        <a href="mailto:generator@efectoTEC.de?subject=Feedback v1.78" class="block w-full bg-slate-50 hover:bg-slate-100 text-slate-500 text-[10px] py-2 rounded mb-3 border border-slate-100 transition">
+                            <i class="far fa-envelope mr-1"></i> Feedback senden
+                        </a>
+
+                        <button onclick="location.reload()" class="text-[10px] text-blue-500 hover:underline font-bold">Neue Prüfung generieren</button>
+                    </div>
                 </div>
             </div>
         </div>
         
         <div class="mt-auto pt-2">
             <div class="border-t border-slate-100 flex justify-between items-center text-[9px] text-slate-400 py-2">
-                <span>Version v1.77</span>
+                <span>Version v1.78.2</span>
                 <span class="flex items-center gap-1 cursor-pointer" onclick="showInfo('privacy')"><i class="fas fa-lock text-green-500"></i> Datenschutz aktiv</span>
             </div>
 
@@ -223,6 +252,7 @@
     <script>
         let collectedFiles = [];
         let timerInterval;
+        let slowNetworkTimeout;
 
         const genSprueche = [
             "Mir pocht das Herz schon vor Aufregung! ❤️",
@@ -233,20 +263,17 @@
         ];
 
         const anaSprueche = [
-            "Ich entschlüssle deine Sauklaue... 🧐",
+            "Ich entschlüssle deine Bilder... 🧐",
             "Das ist aber harter Stoff... 📚",
             "Scanne Pixel für Pixel... 🤖",
-            "Hoffentlich kann ich das lesen... 😅"
+            "Gleich habe ich das Thema erkannt..."
         ];
 
         window.onload = function() {
-            const klasseSelect = document.getElementById('input-klasse');
-            if (klasseSelect && !klasseSelect.value) klasseSelect.value = "9";
-            
-            // Cookie Check
+            // Check for Cookies
             if (!localStorage.getItem('cookiesAccepted')) {
                 document.getElementById('cookie-banner').classList.remove('hidden');
-                document.getElementById('cookie-banner').style.display = 'flex'; // Override hidden class logic if needed for flex
+                document.getElementById('cookie-banner').style.display = 'flex'; 
             }
         };
 
@@ -259,56 +286,29 @@
             const modal = document.getElementById('info-modal');
             const title = document.getElementById('modal-title');
             const text = document.getElementById('modal-text');
-            
             modal.classList.remove('hidden');
 
-            // HIER SIND DIE ECHTEN DATEN (Vom Founder bestätigt)
             if (type === 'privacy') {
                 title.innerText = "Datenschutz & Cleaner 🔒";
                 text.innerHTML = "Deine Bilder werden verschlüsselt übertragen und nur im flüchtigen RAM verarbeitet. 60 Sekunden nach der PDF-Erstellung löscht unser Cleaner-Skript alle temporären Dateien (.tex, .pdf, .log) restlos vom Server.";
             } else if (type === 'examType') {
                 title.innerText = "Prüfungsarten";
-                text.innerHTML = `
-                    <strong>⚡ Stegreifaufgabe (Ex):</strong><br>
-                    Umfasst den Stoff der letzten 2 Unterrichtsstunden. Zeit zum Lösen der Aufgaben ca. 20 Min.<br><br>
-                    <strong>🎓 Schulaufgabe (SA):</strong><br>
-                    Umfasst den Stoff einer gesamten Lernsequenz (mehrere Wochen). Zeit zum Lösen der Aufgaben ca. 60 Min.
-                `;
+                text.innerHTML = `<strong>⚡ Stegreifaufgabe (Ex):</strong><br>Umfasst den Stoff der letzten 2 Unterrichtsstunden. Zeit zum Lösen der Aufgaben ca. 20 Min.<br><br><strong>🎓 Schulaufgabe (SA):</strong><br>Umfasst den Stoff einer gesamten Lernsequenz. Zeit zum Lösen ca. 60 Min.`;
             } else if (type === 'afb') {
                 title.innerText = "Anforderungsbereiche (AFB)";
                 text.innerText = "Bayerische Prüfungen müssen AFB I (Reproduktion), AFB II (Anwendung) und AFB III (Transfer) abdecken. Unser Generator nutzt die empfohlene 40/40/20-Verteilung.";
             } else if (type === 'noten') {
                 title.innerText = "Bewertung & Noten";
-                text.innerText = "Der Notenschlüssel folgt dem bayerischen Standard (GSO). Note 4 wird bei ca. 45-50% der Punkte erreicht. Ab Klasse 11 werden automatisch Punkte (0-15) verwendet.";
+                text.innerText = "Der Notenschlüssel folgt dem bayerischen Standard (GSO). Note 4 wird bei ca. 45-50% der Punkte erreicht.";
             } else if (type === 'impressum') {
                 title.innerText = "Impressum";
-                text.innerHTML = `
-                    <strong>Angaben gemäß § 5 TMG</strong><br>
-                    EfectoTEC Christian Unger<br>
-                    Inhaber: Christian Unger<br>
-                    Tannholzstraße 4<br>
-                    86424 Dinkelscherben<br>
-                    Deutschland<br><br>
-                    <strong>Kontakt:</strong><br>
-                    Telefon: 0151 50011381<br>
-                    Mail: generator@efectoTEC.de<br><br>
-                    <strong>Umsatzsteuer-ID:</strong><br>
-                    DE321863048<br>
-                    <em>Kleinunternehmer gemäß § 19 UStG</em>
-                `;
+                text.innerHTML = `<strong>Angaben gemäß § 5 TMG</strong><br>EfectoTEC Christian Unger<br>Inhaber: Christian Unger<br>Tannholzstraße 4<br>86424 Dinkelscherben<br>Deutschland<br><br><strong>Kontakt:</strong><br>Telefon: 0151 50011381<br>Mail: generator@efectoTEC.de`;
             } else if (type === 'datenschutz') {
                 title.innerText = "Datenschutzerklärung";
                 text.innerHTML = "Wir speichern keine personenbezogenen Daten. Uploads dienen ausschließlich der temporären Verarbeitung und werden sofort gelöscht.<br><br>Hosting: Google Cloud Europe.";
             } else if (type === 'g9') {
                 title.innerText = "G9-Ready 🚀";
-                text.innerHTML = `
-                    <p class="mb-2">Das Programm ist exakt auf den <strong>neuen Lehrplan Plus</strong> und die veränderte Taktung des neunjährigen Gymnasiums zugeschnitten. Das heißt:</p>
-                    <ul class="list-disc pl-4 space-y-1 mb-2">
-                        <li><strong>Stoffverteilung:</strong> Es berücksichtigt, dass Themen, die im G8 in Klasse 9 dran waren, im G9 vielleicht erst in Klasse 10 kommen.</li>
-                        <li><strong>Vertiefung:</strong> Es bietet mehr Übungsmaterial für die neu gewonnenen "Intensivierungsstunden".</li>
-                        <li><strong>Oberstufen-Fokus:</strong> Es ist auf die neuen Prüfungsformate des ersten G9-Abis (ab 2026) vorbereitet.</li>
-                    </ul>
-                `;
+                text.innerHTML = `<p class="mb-2">Das Programm ist exakt auf den <strong>neuen Lehrplan Plus</strong> zugeschnitten.</p>`;
             }
         }
 
@@ -326,6 +326,38 @@
             }, 750);
         }
 
+        // UPDATE v1.78: Speed-Boost (Image Compression)
+        async function compressImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX_WIDTH = 1200;
+                        const MAX_HEIGHT = 1600;
+                        let width = img.width;
+                        let height = img.height;
+
+                        if (width > height) {
+                            if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+                        } else {
+                            if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+                        }
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        canvas.toBlob((blob) => {
+                            resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+                        }, 'image/jpeg', 0.7); 
+                    };
+                };
+            });
+        }
+
         function addFiles() {
             const input = document.getElementById('fileInput');
             if (input.files.length > 0) {
@@ -337,11 +369,16 @@
                 }
                 const filesToAdd = Array.from(input.files).slice(0, remainingSlots);
                 filesToAdd.forEach(f => collectedFiles.push(f));
-                if (input.files.length > remainingSlots) alert("Maximal 3 Bilder erlaubt!");
             }
             updatePreview();
             input.value = ''; 
             toggleAnalyzeBtn();
+            
+            // Robot Heartbeat feedback for adding files
+            const heart = document.getElementById('robot-heart');
+            heart.classList.remove('hidden');
+            heart.classList.add('heart-beat');
+            setTimeout(() => { heart.classList.remove('heart-beat'); heart.classList.add('hidden'); }, 1500);
         }
 
         function updatePreview() {
@@ -357,11 +394,14 @@
                     const reader = new FileReader();
                     reader.onload = (e) => {
                         const slot = document.getElementById(`slot-${idx}`);
-                        slot.className = "aspect-square rounded-lg border border-slate-200 relative group overflow-hidden";
+                        slot.className = "aspect-square rounded-lg border border-slate-200 relative group overflow-hidden bg-slate-100";
                         slot.onclick = null; 
+                        // UPDATE v1.78.1: HOTFIX - event.stopPropagation() eingebaut um Bubbling zu verhindern
                         slot.innerHTML = `
                             <img src="${e.target.result}" class="w-full h-full object-cover">
-                            <button onclick="removeFile(${idx})" class="absolute inset-0 bg-red-500/50 text-white opacity-0 group-hover:opacity-100 transition flex items-center justify-center"><i class="fas fa-times"></i></button>
+                            <button onclick="event.stopPropagation(); removeFile(${idx})" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow hover:bg-red-600 transition z-10">
+                                <i class="fas fa-times text-xs"></i>
+                            </button>
                         `;
                     };
                     reader.readAsDataURL(file);
@@ -378,55 +418,88 @@
         function toggleAnalyzeBtn() {
             const chk = document.getElementById('privacyCheck');
             const btn = document.getElementById('btn-analyze');
+            const privContainer = document.getElementById('privacy-container');
             const hasFiles = collectedFiles.length > 0;
             
+            // UPDATE v1.78: Privacy Highlighting
+            if (hasFiles && !chk.checked) {
+                privContainer.classList.add('border-red-400', 'bg-red-50');
+                privContainer.classList.remove('border-blue-100', 'bg-blue-50');
+            } else {
+                privContainer.classList.remove('border-red-400', 'bg-red-50');
+                privContainer.classList.add('border-blue-100', 'bg-blue-50');
+            }
+
             if (chk.checked && hasFiles) {
                 btn.disabled = false;
-                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                btn.classList.remove('opacity-50', 'cursor-not-allowed', 'bg-slate-800');
+                btn.classList.add('bg-blue-600', 'hover:bg-blue-700'); 
             } else {
                 btn.disabled = true;
-                btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.classList.add('opacity-50', 'cursor-not-allowed', 'bg-slate-800');
+                btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
             }
         }
 
         function startTextRotation(elementId, textArray, intervalTime = 4000) {
             if(timerInterval) clearInterval(timerInterval);
             const el = document.getElementById(elementId);
-            
-            const update = () => {
-                const index = Math.floor(Date.now() / intervalTime) % textArray.length;
-                el.innerText = textArray[index];
-            };
-            
+            const update = () => { el.innerText = textArray[Math.floor(Date.now() / intervalTime) % textArray.length]; };
             update(); 
             timerInterval = setInterval(update, intervalTime);
+        }
+
+        function handleSlowNetwork() {
+            document.getElementById('slow-network-warning').classList.remove('hidden');
         }
 
         async function startAnalysis() {
             document.getElementById('step-upload').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('slow-network-warning').classList.add('hidden');
             
             document.getElementById('robot-img').classList.remove('robot-float');
             document.getElementById('robot-img').classList.add('robot-spin');
 
             startTextRotation('loading-text', anaSprueche, 3500);
-
-            const formData = new FormData();
-            collectedFiles.forEach(file => formData.append('hefteintrag', file));
+            slowNetworkTimeout = setTimeout(handleSlowNetwork, 12000); // 12 Sekunden Warnung
 
             try {
+                // Client-side compression before sending
+                const compressedFiles = await Promise.all(collectedFiles.map(f => compressImage(f)));
+                const formData = new FormData();
+                compressedFiles.forEach(file => formData.append('hefteintrag', file));
+
                 const res = await fetch('/analyze', { method: 'POST', body: formData });
                 const data = await res.json();
-                
                 if (data.error) throw new Error(data.error);
 
-                if(data.fach) document.getElementById('input-fach').value = data.fach;
+                // UPDATE v1.78: Strikte Defaults via JavaScript-Wächter
+                const validFaecher = ["Allgemeinwissen", "Mathematik", "Deutsch", "Englisch", "Latein", "Französisch", "Physik", "Chemie", "Biologie", "Geographie", "Wirtschaft und Recht", "Sonstiges"];
+                if(data.fach && validFaecher.includes(data.fach) && data.fach !== "Sonstiges") {
+                    document.getElementById('input-fach').value = data.fach;
+                } else {
+                    document.getElementById('input-fach').value = "Allgemeinwissen";
+                }
+
                 if(data.klasse) {
                     const k = data.klasse.replace(/\D/g,'');
-                    if(k) document.getElementById('input-klasse').value = k;
+                    if(k >= 5 && k <= 13) {
+                        document.getElementById('input-klasse').value = k;
+                    } else {
+                        document.getElementById('input-klasse').value = "nicht erkannt";
+                    }
+                } else {
+                    document.getElementById('input-klasse').value = "nicht erkannt";
                 }
-                if(data.thema) document.getElementById('input-thema').value = data.thema;
 
+                if(data.thema && data.thema.trim() !== "") {
+                    document.getElementById('input-thema').value = data.thema;
+                } else {
+                    document.getElementById('input-thema').value = "nicht erkannt";
+                }
+
+                clearTimeout(slowNetworkTimeout);
                 clearInterval(timerInterval);
                 document.getElementById('loading').classList.add('hidden');
                 document.getElementById('step-config').classList.remove('hidden');
@@ -435,7 +508,8 @@
                 document.getElementById('robot-img').classList.add('robot-float');
 
             } catch (err) {
-                alert("Fehler: " + err.message);
+                clearTimeout(slowNetworkTimeout);
+                alert("Fehler bei der Analyse: Bitte überprüfe deine Verbindung.");
                 location.reload();
             }
         }
@@ -443,18 +517,28 @@
         async function submitGeneration(type) {
             document.getElementById('step-config').classList.add('hidden');
             document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('slow-network-warning').classList.add('hidden');
             
             document.getElementById('robot-img').classList.remove('robot-float'); 
             document.getElementById('robot-heart').classList.remove('hidden');
             document.getElementById('robot-heart').classList.add('heart-beat');
 
             startTextRotation('loading-text', genSprueche, 5000);
-
-            const formData = new FormData(document.getElementById('generateForm'));
-            collectedFiles.forEach(file => formData.append('hefteintrag', file));
-            formData.append('examType', type);
+            slowNetworkTimeout = setTimeout(handleSlowNetwork, 15000);
 
             try {
+                // Send compressed files again
+                const compressedFiles = await Promise.all(collectedFiles.map(f => compressImage(f)));
+                const formData = new FormData(document.getElementById('generateForm'));
+                
+                // Fallback für den Fall, dass das Thema leer gelassen wurde
+                if(!formData.get('userThema') || formData.get('userThema').trim() === '') {
+                    formData.set('userThema', 'nicht erkannt');
+                }
+                
+                compressedFiles.forEach(file => formData.append('hefteintrag', file));
+                formData.append('examType', type);
+
                 const res = await fetch('/generate', { method: 'POST', body: formData });
                 if (!res.ok) throw new Error(await res.text());
                 
@@ -466,7 +550,15 @@
                     if (filenameMatch && filenameMatch.length === 2) filename = filenameMatch[1];
                 }
 
+                // UPDATE v1.78: Direkter Sprung auf die Feedback/Download Seite
                 const url = window.URL.createObjectURL(blob);
+                
+                // Konfiguriere manuellen Button
+                const manualBtn = document.getElementById('manual-download-btn');
+                manualBtn.href = url;
+                manualBtn.download = filename;
+
+                // Versuche automatischen Download als Fallback/Bequemlichkeit
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = filename;
@@ -475,21 +567,21 @@
                 a.click();
                 a.remove();
                 
+                clearTimeout(slowNetworkTimeout);
                 clearInterval(timerInterval);
-                document.getElementById('loading-text').innerText = "Fertig! PDF wird geladen.";
                 
+                // Sofort UI wechseln (kein störender "Fertig" Text mehr)
                 document.getElementById('robot-heart').classList.add('hidden');
                 document.getElementById('robot-heart').classList.remove('heart-beat');
                 document.getElementById('robot-img').classList.add('robot-float');
                 
-                setTimeout(() => {
-                    document.getElementById('loading').classList.add('hidden');
-                    document.getElementById('step-feedback').classList.remove('hidden');
-                }, 1500);
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('step-feedback').classList.remove('hidden');
 
             } catch (err) {
+                clearTimeout(slowNetworkTimeout);
                 clearInterval(timerInterval);
-                alert("Fehler: " + err.message);
+                alert("Fehler bei der PDF-Erstellung: " + err.message);
                 location.reload();
             }
         }
